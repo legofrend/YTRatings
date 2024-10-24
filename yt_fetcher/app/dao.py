@@ -1,6 +1,6 @@
 from datetime import date
-import json
-import locale
+
+# import locale
 from sqlalchemy import delete, insert, select, text, update
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -293,12 +293,12 @@ class ReportDAO(BaseDAO):
 
         category = CategoryDAO().find_by_id(category_id)
 
-        locale.setlocale(locale.LC_ALL, "Russian")
-        display_period = period._date.strftime("%B %Y")
+        # locale.setlocale(locale.LC_ALL, "Russian")
+        # display_period = period._date.strftime("%B %Y")
         result = {
             "id": id,
             "period": period.strf(),
-            "display_period": display_period,
+            # "display_period": period._date.strftime("%B %Y"),
             "category_id": category_id,
             "category": category,
             "scale": scale,

@@ -3,7 +3,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Dict, Optional
 
 
-
 class SVideoStat(BaseModel):
     duration: int | None
     score: int | None
@@ -68,7 +67,7 @@ class SCategory(BaseModel):
 class SReport(BaseModel):
     id: Optional[int] = None
     period: date
-    display_period: str
+    display_period: Optional[str] = None
     category_id: int
     category: SCategory
     scale: int
