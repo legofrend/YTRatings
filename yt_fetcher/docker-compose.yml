@@ -2,16 +2,34 @@ services:
   db:
     image: postgres:16
     container_name: o2t4_db
-    environment:
-      POSTGRES_DB: o2t4_db
-      POSTGRES_USER: root
-      POSTGRES_PASSWORD: gVHGQ8xkw8!db
-    # env_file: # Файл с переменными окружения (Вместо environment)
-    # - .env
+    # environment:
+    #   POSTGRES_DB: o2t4_db
+    #   POSTGRES_USER: root
+    #   POSTGRES_PASSWORD: xxx
+    env_file: # Файл с переменными окружения (Вместо environment)
+      - .env
     ports:
       - 5433:5432
     volumes:
       - o2t4_postgresdata:/var/lib/postgresql/data
+    networks:
+      - o2t4_network
+    restart: always
+
+  app:
+    image: appimg
+    build:
+      context: .
+    container_name: ytr_app
+    # volumes:
+    #   - ./pages:/code/pages
+    env_file:
+      - .env-docker
+    depends_on: # Запускаем только после запуска БД и Redis (depends on = зависит от)
+      - db
+    command: sh -c "uvicorn app.fastapi_app:app --port 5000 --host 0.0.0.0 --proxy-headers"
+    ports:
+      - 5001:5000
     networks:
       - o2t4_network
 

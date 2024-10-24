@@ -7,8 +7,8 @@ from fastapi.staticfiles import StaticFiles
 from starlette.requests import Request
 from fastapi.responses import HTMLResponse, FileResponse
 
-from yt_fetcher.app.logger import logger
-from dao import ReportDAO
+from app.logger import logger
+from app.dao import ReportDAO
 
 
 def swagger_monkey_patch(*args, **kwargs):

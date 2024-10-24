@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Dict, Optional
-import locale
+
 
 
 class SVideoStat(BaseModel):
