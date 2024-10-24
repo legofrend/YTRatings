@@ -3,12 +3,10 @@ import time
 from fastapi import FastAPI, applications
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
-from fastapi.staticfiles import StaticFiles
 from starlette.requests import Request
-from fastapi.responses import HTMLResponse, FileResponse
 
-from yt_fetcher.app.logger import logger
-from dao import ReportDAO
+from app.logger import logger
+from app.dao import ReportDAO
 
 
 def swagger_monkey_patch(*args, **kwargs):
@@ -30,8 +28,10 @@ app = FastAPI(
 
 origins = [
     "http://localhost:8080",
+    "http://localhost:5000",
     "http://127.0.0.1:5000",
     "http://o2t4.ru",
+    "http://*.o2t4.ru",
 ]
 # Разрешите все источники CORS, разрешите все методы, разрешите заголовки и разрешите с куки
 app.add_middleware(

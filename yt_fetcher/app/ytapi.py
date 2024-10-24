@@ -4,10 +4,10 @@ from datetime import datetime, timedelta
 import re
 import functools
 
-from yt_fetcher.app.logger import logger
-from yt_fetcher.app.config import settings
-from period import Period
-from dao import VideoDAO, VideoStatDAO, ChannelStatDAO, ChannelDAO
+from app.logger import logger
+from app.config import settings
+from app.period import Period
+from app.dao import VideoDAO, VideoStatDAO, ChannelStatDAO, ChannelDAO
 
 
 YT_TIME_REGEX = re.compile(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?")

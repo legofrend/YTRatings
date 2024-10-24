@@ -1,4 +1,4 @@
-from services import *
+from app.services import *
 
 
 def main():

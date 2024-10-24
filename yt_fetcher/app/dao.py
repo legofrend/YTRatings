@@ -4,10 +4,10 @@ import locale
 from sqlalchemy import delete, insert, select, text, update
 from sqlalchemy.exc import SQLAlchemyError
 
-from database import session_maker, engine, Base
-from yt_fetcher.app.logger import logger, save_errors
-from models import Category, Channel, ChannelStat, Video, VideoStat, Report
-from schemas import (
+from app.database import session_maker, engine, Base
+from app.logger import logger, save_errors
+from app.models import Category, Channel, ChannelStat, Video, VideoStat, Report
+from app.schemas import (
     SChannelStat,
     SMetaData,
     SVideoStat,
@@ -15,7 +15,7 @@ from schemas import (
     SReport,
     SChannel,
 )
-from period import Period
+from app.period import Period
 
 
 class BaseDAO:

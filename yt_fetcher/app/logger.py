@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, UTC
 from pythonjsonlogger import jsonlogger
 
-from yt_fetcher.app.config import settings
+from app.config import settings
 
 
 logger = logging.getLogger()

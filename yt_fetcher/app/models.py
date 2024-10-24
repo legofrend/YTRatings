@@ -14,7 +14,7 @@ from sqlalchemy.dialects.postgresql import JSON, JSONB
 
 from datetime import datetime, date
 
-from database import Base
+from app.database import Base
 
 
 # if TYPE_CHECKING:

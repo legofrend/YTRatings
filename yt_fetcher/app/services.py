@@ -2,10 +2,10 @@ from datetime import datetime, timedelta, date
 import os
 import requests
 
-import ytapi
-from period import Period
-from yt_fetcher.app.logger import logger, save_json
-from dao import ChannelDAO, ReportDAO, VideoDAO, VideoStatDAO, ChannelStatDAO
+import app.ytapi as ytapi
+from app.period import Period
+from app.logger import logger, save_json
+from app.dao import ChannelDAO, ReportDAO, VideoDAO, VideoStatDAO, ChannelStatDAO
 
 
 def get_channel_ids_from_db(filter: dict = {"status": 1}):
