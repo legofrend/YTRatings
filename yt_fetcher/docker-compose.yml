@@ -1,0 +1,23 @@
+services:
+  db:
+    image: postgres:16
+    container_name: o2t4_db
+    environment:
+      POSTGRES_DB: o2t4_db
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: gVHGQ8xkw8!db
+    # env_file: # Файл с переменными окружения (Вместо environment)
+    # - .env
+    ports:
+      - 5433:5432
+    volumes:
+      - o2t4_postgresdata:/var/lib/postgresql/data
+    networks:
+      - o2t4_network
+
+volumes:
+  o2t4_postgresdata:
+
+networks:
+  o2t4_network:
+    driver: bridge

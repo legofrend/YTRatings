@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "yt_fetcher_backend"
+version = "0.1.0"
+description = ""
+authors = ["legofrend <eremin.oleg@mail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+pydantic-settings = "^2.4.0"
+python-json-logger = "^2.0.7"
+sqlalchemy = "^2.0.33"
+asyncpg = "^0.29.0"
+psycopg2 = "^2.9.10"
+fastapi = "^0.115.3"
+uvicorn = "^0.32.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
