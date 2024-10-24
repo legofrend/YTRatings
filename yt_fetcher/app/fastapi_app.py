@@ -23,7 +23,7 @@ applications.get_swagger_ui_html = swagger_monkey_patch
 app = FastAPI(
     title="End-Up API",
     version="0.1.0",
-    root_path="/api/ytr",
+    root_path="/api",
 )
 
 origins = [
@@ -50,12 +50,12 @@ app.add_middleware(
 
 
 # Эндпоинт для отдачи страницы index.html при заходе на домен
-@app.get("/report/")
+@app.get("/ytr/report/")
 async def get_report(period: str, category_id: int):
     return ReportDAO.get(period, category_id)
 
 
-@app.get("/metadata/")
+@app.get("/ytr/metadata/")
 async def get_report():
     return ReportDAO.metadata()
 
