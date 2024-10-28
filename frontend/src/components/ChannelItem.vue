@@ -35,13 +35,14 @@ function channelThumbnail(ch) {
         </div>
         <!-- 3 Канал и метрики -->
         <div class="col-span-1">
-            <div @click="showDetails = !showDetails">
+            <div>
                 <div class="flex-row text-xl ">
                     <div class="md:flex flex-row justify-between items-center">
                         <!-- Channel title -->
                         <div class="" :title="item.description">
-                            <span class=" text-gray-300 cursor-pointer hover:text-black mr-1">{{ showDetails ?
-                                '▼' : '►'
+                            <span @click="showDetails = !showDetails"
+                                class=" text-gray-300 cursor-pointer hover:text-black mr-1 select-none">{{ showDetails ?
+                                    '▼' : '►'
                                 }}</span>
                             <a target="_blank" class="hover:underline"
                                 :href="'https://www.youtube.com/' + item.custom_url">

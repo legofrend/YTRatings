@@ -29,7 +29,8 @@ app = FastAPI(
 origins = [
     "http://localhost:8080",
     "http://localhost:5000",
-    "http://127.0.0.1:5000",
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
     "http://o2t4.ru",
     "http://*.o2t4.ru",
 ]
@@ -84,7 +85,7 @@ if __name__ == "__main__":
         os.path.join(os.path.dirname(os.path.realpath(__file__)), os.pardir)
     )
     uvicorn.run(
-        app="fastapi_app:app",
+        app="app.fastapi_app:app",
         port=5000,
         reload=True,
     )

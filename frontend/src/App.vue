@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import axios from 'axios';
 import Data from './assets/data.json';
 import Chart from './components/Chart.vue';
@@ -7,72 +7,151 @@ import InfoBlock from './components/InfoBlock.vue';
 import FeedbackForm from './components/FeedbackForm.vue';
 
 
+const metaData = ref([]);
 const data = ref([]);
 const loading = ref(true);
 const error = ref(null);
-const currentPeriod = ref(0);
-const currentCategory = ref(1);
-const categories = ref([]);
+const currentCategory = ref(Object);
+const currentPeriodIndex = ref(0)
 
-async function fetchData(category_id) {
-  console.log('fetchData: category_id is ', category_id)
 
-  const d = Data.filter(item => item.category_id == category_id);
-  // sorted [...this.Data].sort((tomb1, tomb2) => tomb1[this.selectedSort]?.localeCompare(tomb2[this.selectedSort]))
-  data.value = d;
-  currentPeriod.value = data.value.length - 1
-  return
+const currentPeriod = computed(() => {
+  return currentCategory.value.periods[currentPeriodIndex.value]
+})
+
+const currentCategoryId = computed(() => {
+  return currentCategory.value.id
+})
+
+const periodDisplay = computed(() => {
+  return formattedDate(currentPeriod.value)
+})
+
+function formattedDate(dateStr) {
+  const dateObject = new Date(dateStr);
+  // console.log('dateStr', typeof dateStr, dateStr)
+  // console.log('dateObject', typeof dateObject, dateObject)
+  const months = [
+    'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+  const month = months[dateObject.getMonth()];
+  const year = dateObject.getFullYear();
+  return `${month} ${year}`;
+}
+
+async function fetchData(category_id, period) {
+  console.log('fetchData: category_id=', category_id, ', period=', period)
 
   try {
-    const response = await axios.get('reports?category_id=' + category_id);
+    const response = await axios.get('report', {
+      params: {
+        category_id: category_id,
+        period: period
+      }
+    });
     data.value = response.data;
-    currentPeriod.value = data.value.length - 1
-    console.log('Current period', currentPeriod.value)
-    console.log('Current display', data.value[currentPeriod.value].display_period)
+    // currentPeriod.value = period
+    // currentCategory.value = category_id
+    // console.log('Current period', currentPeriod.value)
+    // console.log('Current display', data.value[currentPeriod.value].display_period)
   } catch (err) {
     error.value = err.message;
+    return
   } finally {
   }
 }
 
 
-async function fetchCategories() {
+async function fetchMetaData() {
   try {
-    const response = await axios.get('categories');
-    categories.value = response.data;
+    const response = await axios.get('metadata');
+    metaData.value = response.data;
+    // console.log('metaData', metaData.value)
   } catch (err) {
     error.value = err.message;
   } finally {
   }
 }
 
+function changePeriod(change) {
+  const newIndex = currentPeriodIndex.value + change
+  if (newIndex < 0 || newIndex >= currentCategory.value.periods.length) {
+    return False
+  }
+  currentPeriodIndex.value = newIndex
+  fetchData(currentCategoryId.value, currentPeriod.value);
+}
 
-function changeCategory(value) {
-  console.log('changeCategory: value is ', value)
-  currentCategory.value = value
-  fetchData(currentCategory.value);
+
+function changeCategory(categoryId) {
+  // console.log('changeCategory: categoryId=', categoryId, typeof categoryId)
+
+  const category = metaData.value.find(cat => cat.id === Number(categoryId));
+
+  if (!category) {
+    throw new Error('Категория не найдена');
+    // return False
+  }
+
+  // Проверяем существует ли period в категориях
+  if (!category.periods.includes(currentPeriod.value)) {
+    currentPeriodIndex.value = category.periods.length - 1
+  }
+  else {
+    currentPeriodIndex.value = category.periods.indexOf(currentPeriod.value)
+  }
+
+  currentCategory.value = category
+
+  fetchData(categoryId, currentPeriod.value);
 }
 
 watch(
-  currentCategory,
+  currentCategoryId,
   () => {
-    localStorage.setItem('currentCategory', currentCategory.value)
+    localStorage.setItem('currentCategoryId', currentCategoryId.value)
   },
   // { deep: true }
 )
 
+async function initialize() {
+  loading.value = true;
+
+  await fetchMetaData();
+  const localCurrentCategoryId = localStorage.getItem('currentCategoryId');
+  const categoryId = localCurrentCategoryId ? Number(localCurrentCategoryId) : 1;
+
+  console.log('metaData', metaData.value);
+  console.log('currentCategory', currentCategory.value);
+
+  currentCategory.value = metaData.value.find(cat => cat.id === categoryId);
+  console.log('Category', currentCategory.value);
+  if (currentCategory.value) {
+    currentPeriodIndex.value = currentCategory.value.periods.length - 1
+    // const period = category.periods[currentPeriodIndex.value];
+    await fetchData(categoryId, currentPeriod.value);
+  } else {
+    error.value = 'Категория не найдена';
+  }
+
+  loading.value = false;
+
+  return true
+
+}
 
 onMounted(() => {
+  axios.defaults.baseURL = window.location.origin;
+  if (window.location.origin.endsWith(':5173')) {
+    axios.defaults.baseURL = window.location.origin.replace(':5173', ':5000');
+    // for development only
+    // axios.defaults.baseURL = 'https://o2t4.ru/api/';
+  }
+  axios.defaults.baseURL += '/api/ytr/'
+  console.log(axios.defaults.baseURL)
+  // Установка withCredentials в true для передачи куки
+  axios.defaults.withCredentials = true;
 
-  axios.defaults.baseURL = 'https://47b996947b39655e.mokky.dev/';
-  loading.value = true;
-  fetchCategories();
-  const localCurrentCategory = localStorage.getItem('currentCategory');
-  console.log(localCurrentCategory);
-  currentCategory.value = localCurrentCategory ? localCurrentCategory : 1;
-
-  fetchData(currentCategory.value);
-  loading.value = false;
+  initialize();
 
 })
 </script>
@@ -88,26 +167,23 @@ onMounted(() => {
     <p v-if="loading">Loading...</p>
     <p v-else-if="error">{{ error }}</p>
     <div v-else>
-      <h2 class="text-center text-3xl m-3">{{ data[currentPeriod].category.title }}</h2>
-      <info-block header="Критерии" class="text-xs">{{ data[currentPeriod].category.criteria }}</info-block>
+      <h2 class="text-center text-3xl m-3">{{ data.category.title }}</h2>
+      <info-block header="Критерии" class="text-xs">{{ data.category.description }}</info-block>
       <div class="flex justify-center">
-        <select v-model="currentCategory" @change="changeCategory($event.target.value)" name="category"
+        <select v-model="currentCategoryId" @change="changeCategory($event.target.value)" name="category"
           class="text-center text-xl m-3 cursor-pointer">
-          <option v-for="category in categories" :key="category.id" :value="category.id">{{ category.name }}</option>
+          <option v-for="category in metaData" :key="category.id" :value="category.id">{{ category.name }}
+          </option>
         </select>
 
-        <div class="flex justify-center items-center">
-          <span class="text-2xl mx-2 cursor-pointer" @click="currentPeriod == 0 ? False : currentPeriod--">⮜</span>
-          <!-- <img :src="ArrowLeft" class="h-6 mx-3 cursor-pointer" @click="currentPeriod == 0 ? False : currentPeriod--" /> -->
+        <div class="flex justify-center items-center select-none">
+          <img src="/img/arrowLeft.svg" class="h-6 mx-3 cursor-pointer" @click="changePeriod(-1)" />
 
-          <h3 class="text-center text-xl m-3">{{ data[currentPeriod].display_period }}</h3>
-          <!-- <img :src="ArrowRight" class="h-6 mx-3 cursor-pointer"
-            @click="currentPeriod == data.length - 1 ? False : currentPeriod++" /> -->
-          <span class="text-2xl mx-2 cursor-pointer"
-            @click="currentPeriod == data.length - 1 ? False : currentPeriod++">⮞</span>
+          <h3 class="text-center text-xl m-3">{{ periodDisplay }}</h3>
+          <img src="/img/arrowLeft.svg" class="h-6 mx-3 cursor-pointer rotate-180" @click="changePeriod(1)" />
         </div>
       </div>
-      <Chart :data="data[currentPeriod]" />
+      <Chart :data="data" />
     </div>
     <info-block header="Предложить свой канал или тему" class="text-lg my-10"><feedback-form /></info-block>
 

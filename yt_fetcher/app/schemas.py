@@ -61,7 +61,7 @@ class SCategory(BaseModel):
     id: int
     name: str
     title: str
-    criteria: Optional[str] = ""
+    description: Optional[str] = ""
 
 
 class SReport(BaseModel):

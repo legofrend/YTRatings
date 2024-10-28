@@ -8,7 +8,8 @@ const showDetails = ref(false);
 
 <template>
     <div>
-        <div @click="showDetails = !showDetails" class="text-center text-gray-500 cursor-pointer hover:text-black mr-1">
+        <div @click="showDetails = !showDetails"
+            class="text-center select-none text-gray-500 cursor-pointer hover:text-black mr-1">
             <span>{{ showDetails ? '▼' : '►' }}</span>
             <span>{{ header }}</span>
         </div>
