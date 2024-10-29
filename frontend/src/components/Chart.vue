@@ -25,9 +25,12 @@ console.log(props.data)
                 </li>
             </ul>
         </main>
-        <div class="text-2xl flex justify-center mx-3 select-none">
-            <div class="cursor-pointer" @click="showNumber += showNumber < data.data.length ? 10 : 0">⏬</div>
-            <div class="cursor-pointer" @click="showNumber = Math.max(showNumber - 10, 10)">⏫</div>
+        <div class="text-xl flex justify-center mt-3 gap-3 select-none">
+            <button class="border border-gray-500 px-2"
+                @click="showNumber += showNumber < data.data.length ? 10 : 0">Больше</button>
+            <!-- ⏬⏫ -->
+            <button class="border border-gray-500 px-2"
+                @click="showNumber = Math.max(showNumber - 10, 10)">Меньше</button>
         </div>
 
     </div>

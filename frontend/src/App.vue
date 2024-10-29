@@ -161,14 +161,10 @@ onMounted(() => {
     <h1 class="flex items-center justify-center gap-3 text-4xl m-3 ">Рейтинг <img class="h-8"
         src="/img/youtube_logo.svg" alt="">
       каналов</h1>
-    <info-block header="Методика" class="text-xs">Рейтинг на основе суммы просмотров на канале по видео и клипам двух
-      последних месяцев.
-      Клипы (shorts) учитываются с коэффициентом 1/10</info-block>
     <p v-if="loading">Loading...</p>
     <p v-else-if="error">{{ error }}</p>
     <div v-else>
       <h2 class="text-center text-3xl m-3">{{ data.category.title }}</h2>
-      <info-block header="Критерии" class="text-xs">{{ data.category.description }}</info-block>
       <div class="flex justify-center">
         <select v-model="currentCategoryId" @change="changeCategory($event.target.value)" name="category"
           class="text-center text-xl m-3 cursor-pointer">
@@ -185,7 +181,13 @@ onMounted(() => {
       </div>
       <Chart :data="data" />
     </div>
-    <info-block header="Предложить свой канал или тему" class="text-lg my-10"><feedback-form /></info-block>
+    <info-block header="Методика" class="text-xs  mt-10">Рейтинг на основе суммы просмотров на канале по видео и клипам
+      двух
+      последних месяцев. Клипы (shorts) учитываются с коэффициентом 1/10. <p>Критерии выбора каналов: {{
+        data.category.description }}</p>
+
+    </info-block>
+    <info-block header="Предложить свой канал или тему" class="text-lg mt-3"><feedback-form /></info-block>
 
   </div>
 </template>
