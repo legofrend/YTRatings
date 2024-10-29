@@ -3,6 +3,28 @@ alter table category add active boolean default True not null;
 
 TRUNCATE TABLE report RESTART IDENTITY;
 
+SELECT pg_get_serial_sequence('video_stat', 'id');
+SELECT setval('video_id_seq', (SELECT MAX(id) FROM video) + 1);
+
+
+select c.channel_title,
+       c.description,
+       cs.subscriber_count,
+       cs.video_count
+from channel as c
+left join channel_stat cs on c.channel_id = cs.channel_id
+where c.category_id=5
+order by cs.subscriber_count desc ;
+
+UPDATE channel
+SET status = 1
+WHERE channel_id IN (
+    SELECT c.channel_id
+    FROM channel AS c
+    LEFT JOIN channel_stat cs ON c.channel_id = cs.channel_id
+    WHERE c.category_id = 5 AND cs.subscriber_count >= 5000
+);
+
 select c.id, c.name, r.report_period
 from report as r
 left join category c on c.id = r.category_id
@@ -22,7 +44,8 @@ from channel as c;
 
 
 select channel_id, count(*)
-    from video where published_at_period='2024-09-01'
+    from video
+    where published_at_period='2024-09-01'
 group by 1;
 
 select v.published_at_period,
@@ -30,10 +53,10 @@ select v.published_at_period,
        count(vs.id)
 from video as v
 left join channel as c on c.channel_id = v.channel_id
-left join video_stat vs on v.video_id = vs.video_id and vs.report_period = '2024-09-01'
-where c.category_id=1 and v.published_at_period >= '2024-08-01'
+left join video_stat vs on v.video_id = vs.video_id and vs.report_period = '2024-10-01'
+where c.category_id=5 and v.published_at_period >= '2024-08-01'
 group by 1
-order by c.id;
+;
 
 -- vs.id is null and
 
@@ -48,7 +71,9 @@ select video_id, title from channel_period_top_videos
  group by 1
  limit 50;
 
-update video set published_at_period = '2024-07-01' where published_at >= '2024-06-23' and published_at_period is null;
+update video set published_at_period = date_trunc('month', published_at)::date where published_at_period is null;
+
+select date_trunc('month', published_at)::date from video limit 3;
 
 select * from channel_period_top_videos limit 3;
 

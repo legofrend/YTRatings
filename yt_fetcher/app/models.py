@@ -46,7 +46,7 @@ class ChannelStat(Base):
     channel_id: Mapped[str] = mapped_column(ForeignKey("channel.channel_id"))
     data_at: Mapped[datetime]
     report_period: Mapped[Optional[date]] = mapped_column(
-        Date, default=func.date_trunc("month", func.current_date).cast(Date)
+        Date, default=func.date_trunc("month", func.current_date()).cast(Date)
     )
     channel_view_count: Mapped[Optional[int]] = mapped_column(BigInteger)
     subscriber_count: Mapped[Optional[int]] = mapped_column(BigInteger)
@@ -80,7 +80,7 @@ class VideoStat(Base):
     like_count: Mapped[int] = mapped_column(BigInteger)
     comment_count: Mapped[int] = mapped_column(BigInteger)
     report_period: Mapped[Optional[date]] = mapped_column(
-        Date, default=func.date_trunc("month", func.current_date).cast(Date)
+        Date, default=func.date_trunc("month", func.current_date()).cast(Date)
     )
     prev_period: Mapped[date] = mapped_column(
         Computed("report_period - interval '1 month' ")

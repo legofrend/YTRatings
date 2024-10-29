@@ -67,7 +67,8 @@ select
     sum(like_count) as like_count,
     sum(comment_count) as comment_count
 from video_stat_change as vs
-group by 1,2, 3, 4, 5, 6;
+group by 1, 2, 3, 4, 5, 6
+having count(*)>0;
 
 
 -- 3. Prepare data for report by channel, rank channels

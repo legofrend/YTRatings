@@ -4,7 +4,8 @@ from datetime import date
 from sqlalchemy import delete, insert, select, text, update
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.database import session_maker, engine, Base
+from app.dao_base import BaseDAO
+from app.database import session_maker, engine
 from app.logger import logger, save_errors
 from app.models import Category, Channel, ChannelStat, Video, VideoStat, Report
 from app.schemas import (
@@ -17,148 +18,7 @@ from app.schemas import (
 )
 from app.period import Period
 
-
-class BaseDAO:
-    model = None
-
-    # Метод было решено скрестить с find_one_or_none, т.к. они выполняют одну и ту же функцию
-    @classmethod
-    def find_by_id(cls, model_id: int):
-        return cls.find_one_or_none(id=model_id)
-
-    @classmethod
-    def find_one_or_none(cls, **filter_by):
-        with session_maker() as session:
-            query = select(cls.model.__table__.columns).filter_by(**filter_by)
-            result = session.execute(query)
-            return result.mappings().one_or_none()
-
-    @classmethod
-    def find_all(cls, **filter_by):
-        with session_maker() as session:
-            query = select(cls.model.__table__.columns).filter_by(**filter_by)
-            result = session.execute(query)
-            return result.mappings().all()
-
-    @classmethod
-    def add(cls, **data):
-        try:
-            query = insert(cls.model).values(**data).returning(cls.model.id)
-            with session_maker() as session:
-                # logger.warning(query.compile(compile_kwargs={"literal_binds": True}))
-                result = session.execute(query)
-                session.commit()
-                return result.mappings().first()
-                # return True
-        except (SQLAlchemyError, Exception) as e:
-            if isinstance(e, SQLAlchemyError):
-                msg = f"Database Exc: Cannot insert data into table"
-            elif isinstance(e, Exception):
-                msg = "Unknown Exc: Cannot insert data into table"
-
-            logger.error(msg, extra={"table": cls.model.__tablename__}, exc_info=True)
-            return None
-
-    @classmethod
-    def add_update_bulk(cls, data, index: str = "", skip_if_exist: bool = False):
-        if not index:
-            index = str(cls.model.__tablename__) + "_id"
-        errors = []
-        stored = []
-        updated = []
-        for d in data:
-            obj = cls.find_one_or_none(**{index: d[index]})
-            if not obj:
-                stored.append(d) if cls.add(**d) else errors.append(d)
-            elif skip_if_exist:
-                continue
-            else:
-                (
-                    updated.append(d)
-                    if cls.update(obj.get("id"), **d)
-                    else errors.append(d)
-                )
-
-        msg = f"Added to {cls.model.__tablename__} {len(stored)} records, updated {len(updated)}"
-        if errors:
-            save_errors(errors, cls.model.__tablename__)
-            msg += f", {len(errors)} errors"
-            logger.error(msg)
-        else:
-            logger.info(msg)
-
-        return (stored, updated, errors)
-
-    @classmethod
-    def add_bulk(cls, data: list):
-        errors = []
-        stored = []
-        for d in data:
-            stored.append(d) if cls.add(**d) else errors.append(d)
-
-        msg = f"Added to {cls.model.__tablename__} {len(stored)} records"
-        if errors:
-            save_errors(errors, cls.model.__tablename__)
-            msg += f", {len(errors)} errors"
-            logger.error(msg)
-        else:
-            logger.info(msg)
-
-        return (stored, errors)
-
-    @classmethod
-    def add_bulk_old(cls, *data):
-        # Функция не работает как надо
-        # Для загрузки массива данных [{"id": 1}, {"id": 2}]
-        # мы должны обрабатывать его через позиционные аргументы *args.
-        try:
-            query = insert(cls.model).values(*data)  # .returning(cls.model.id)
-            with session_maker() as session:
-                result = session.execute(query)
-                session.commit()
-                # return result.mappings().first()
-                return True
-        except (SQLAlchemyError, Exception) as e:
-            if isinstance(e, SQLAlchemyError):
-                msg = "Database Exc"
-            elif isinstance(e, Exception):
-                msg = "Unknown Exc"
-            msg += ": Cannot bulk insert data into table"
-
-            logger.error(msg, extra={"table": cls.model.__tablename__}, exc_info=True)
-            return None
-
-    @classmethod
-    def update(cls, model_id: int, id_name: str = "id", **data):
-        try:
-            query = (
-                update(cls.model)
-                .values(**data)
-                .filter_by(**{id_name: model_id})
-                # .returning(cls.model.id)
-            )
-            with session_maker() as session:
-                result = session.execute(query)
-                session.commit()
-                # return result.mappings().first()
-                return True
-
-        except (SQLAlchemyError, Exception) as e:
-            if isinstance(e, SQLAlchemyError):
-                msg = "Database Exc: Cannot update data into table"
-            elif isinstance(e, Exception):
-                msg = "Unknown Exc: Cannot update data into table"
-
-            logger.error(msg, extra={"table": cls.model.__tablename__}, exc_info=True)
-            return None
-
-    @classmethod
-    def delete(cls, **filter_by):
-        with session_maker() as session:
-            query = delete(cls.model).filter_by(**filter_by).returning(cls.model.id)
-            res = session.execute(query)
-            session.commit()
-            return res.mappings().all()
+# import app.ytapi as ytapi
 
 
 class CategoryDAO(BaseDAO):
@@ -168,26 +28,56 @@ class CategoryDAO(BaseDAO):
 class ChannelDAO(BaseDAO):
     model = Channel
 
+    @classmethod
+    def get_ids(cls, filter: dict = {}):
+        if not "status" in filter.keys():
+            filter["status"] = 1
+        data = cls.find_all(**filter)
+        ids = [d.channel_id for d in data]
+        return ids
+
+    # @classmethod
+    # def find_by_title(cls, title: str) -> str:
+    #     channel = cls.find_one_or_none(channel_title=title)
+    #     if not channel:
+    #         [channel] = ytapi.find_channel(title)
+    #     if not channel:
+    #         return None
+    #     return channel.get("channel_id")
+
+    # @classmethod
+    # def find_by_keywords(cls, keywords: str) -> list[tuple[str, str]]:
+    #     [channel] = ytapi.find_channel(keywords)
+    #     if not channel:
+    #         return None
+    #     return channel.get("channel_id")
+
 
 class VideoDAO(BaseDAO):
     model = Video
 
     @classmethod
-    def get_videos_wo_stat(cls):
+    def get_videos_wo_stat(cls, category_id: int):
         # TODO: add filter by report_period and category_id
         with session_maker() as session:
-            query = """select distinct v.video_id
+            query = f"""select distinct v.video_id
                         from video as v
                         left join channel as c on c.channel_id = v.channel_id
-                        left join video_stat vs on v.video_id = vs.video_id and vs.report_period = '2024-09-01'
-                        where c.category_id=1 and vs.id is null and v.published_at_period >= '2024-08-01'
-                        order by c.id;
+                        left join video_stat vs on v.video_id = vs.video_id and vs.report_period = '2024-10-01'
+                        where c.category_id={category_id} and vs.id is null and v.published_at_period >= '2024-08-01'
+                        ;
                     """
             query = text(query)
             result = session.execute(query)
             data = result.mappings().all()
             data = [item["video_id"] for item in data]
             return data
+
+    @classmethod
+    def get_ids(cls, filters: dict = {}):
+        data = cls.find_all(**filters)
+        ids = [d.video_id for d in data]
+        return ids
 
 
 class VideoStatDAO(BaseDAO):
@@ -244,7 +134,7 @@ class ReportDAO(BaseDAO):
             filter={"report_period": period.strf(), "category_id": category_id},
         )
 
-        top_videos = cls._query_top_videos(period, category_id)
+        top_videos = cls._query_top_videos(period, category_id, top_number=5)
         channels = []
         for i in data:
             stat = SChannelStat.model_validate(i)

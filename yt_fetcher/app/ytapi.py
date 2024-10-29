@@ -4,6 +4,9 @@ from datetime import datetime, timedelta
 import re
 import functools
 
+import asyncio
+import aiohttp
+
 from app.logger import logger
 from app.config import settings
 from app.period import Period
@@ -130,7 +133,7 @@ def get_search_list(
 
     total_results = response["pageInfo"].get("totalResults", 0)
     if total_results > len(data):
-        logger.warning(
+        logger.debug(
             "Seems we didn't fetch all data",
             extra={
                 "totalResults": total_results,
@@ -143,15 +146,15 @@ def get_search_list(
 
 
 @store_db(ChannelDAO, mode="add_skip")
-def find_channels(names: str | list):
-    if isinstance(names, str):
-        names = [names]
-    data = []
-    for name in names:
-        d = get_search_list(
-            query=name, type="channel", max_result=1
-        )  # , order='viewCount'
-        data.extend(d)
+def find_channel(query: str, max_result: int = 1, order: OrderType = "relevance"):
+    data = get_search_list(
+        query=query, type="channel", max_result=max_result, order=order
+    )
+    return data
+
+
+def find_channels(names: list):
+    data = [find_channel(name) for name in names]
     return data
 
 
@@ -337,6 +340,8 @@ def get_channels_by_keywords(
     date_from: datetime = datetime.now(),
     iterations: int = 8,
     date_step: int = 7,
+    order: OrderType = "relevance",
+    type: ResourseType = "video",
 ):
 
     data = []
@@ -346,8 +351,8 @@ def get_channels_by_keywords(
             videos = get_search_list(
                 query,
                 published=published_range,
-                type="video",
-                order="viewCount",
+                type=type,
+                order=order,
                 max_result=50,
             )
             data.extend(videos)
@@ -365,11 +370,6 @@ def get_channels_by_keywords(
     return get_channel_detail(unique_channel_ids)
 
 
-import asyncio
-import aiohttp
-from dao import VideoDAO
-
-
 async def check_short(video_id):
     url = f"https://www.youtube.com/shorts/{video_id}"
     async with aiohttp.ClientSession() as session:
@@ -379,7 +379,7 @@ async def check_short(video_id):
             elif response.status == 303:
                 is_short = 0  # Это обычное видео
             else:
-                print(f"{video_id=}, status={response.status}")
+                logger.error(f"{video_id=}, status={response.status}")
                 is_short = None  # Не удалось определить
             return video_id, is_short
 
@@ -410,3 +410,7 @@ def check_is_short():
         i += step
         logger.info(f"Checking shorts {i}/{total}")
         time.sleep(1)
+
+
+check_is_short()
+# print("OK")
