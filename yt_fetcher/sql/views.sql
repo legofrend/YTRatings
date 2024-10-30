@@ -122,7 +122,7 @@ DROP VIEW IF EXISTS channel_period_top_videos;
 create view channel_period_top_videos as
 WITH ranked AS (
     SELECT *,
-           ROW_NUMBER() OVER (PARTITION BY report_period, channel_id ORDER BY score DESC) AS rank
+           ROW_NUMBER() OVER (PARTITION BY report_period, channel_id ORDER BY is_short, score DESC) AS rank
     FROM video_stat_change
     where is_new=1
 )
@@ -135,6 +135,8 @@ SELECT
     v.clickbait_comment
 FROM ranked as r
 left join video as v on v.video_id = r.video_id;
+
+
 
 -- 5. Stat changes on channel level
 DROP VIEW IF EXISTS channel_stat_change;

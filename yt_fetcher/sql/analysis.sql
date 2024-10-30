@@ -58,6 +58,12 @@ where c.category_id=5 and v.published_at_period >= '2024-08-01'
 group by 1
 ;
 
+select distinct v.video_id
+from video as v
+    left join channel as c on c.channel_id = v.channel_id
+    left join video_stat vs on v.video_id = vs.video_id and vs.report_period = '2024-10-01'
+where c.category_id=6 and vs.id is null and v.published_at_period >= '2024-09-01';
+
 -- vs.id is null and
 
 
