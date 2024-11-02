@@ -1,22 +1,5 @@
-from datetime import datetime, timedelta, date
 import os
 import requests
-
-from app.period import Period
-from app.logger import logger, save_json
-from app.dao import ChannelDAO, ReportDAO, VideoDAO, VideoStatDAO, ChannelStatDAO
-
-
-def update_data_for_period(
-    category_id: int,
-    period: Period = Period(),
-):
-    # ChannelStatDAO.update_stat(report_period=period, category_id=category_id)
-    # VideoDAO.search_new_by_category_period(period=period, category_ids=category_id)
-    # VideoDAO.update_detail()
-    # VideoDAO.update_is_short()
-    VideoStatDAO.update_stat(report_period=period, category_id=category_id)
-    ReportDAO.build(period, category_id)
 
 
 def download_thumbnails(data: list[dict], path: str = None):

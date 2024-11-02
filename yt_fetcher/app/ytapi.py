@@ -190,7 +190,7 @@ def parse_response(response, type: TableType) -> list[dict]:
                     info.get("publishedAt"), DATETIME_YT_F2
                 )
                 # TODO: check
-            published_period_dt = published_dt - published_dt.day
+            published_period_dt = published_dt.replace(day=1)
 
         if type == "video":
             is_short = 0

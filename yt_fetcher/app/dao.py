@@ -24,24 +24,6 @@ from app.period import Period
 import app.ytapi as yt
 
 
-# def store_db(dao_class, mode: Literal["add_update", "add_skip", "add"] = "add_update"):
-#     def decorator(func):
-#         @functools.wraps(func)
-#         def wrapper(*args, **kwargs):
-#             # Получаем результат выполнения функции
-#             data = func(*args, **kwargs)
-#             if data:
-#                 if mode == "add":
-#                     dao_class.add_bulk(data)
-#                 else:
-#                     dao_class.add_update_bulk(data, skip_if_exist=(mode == "add_skip"))
-#             return data
-
-#         return wrapper
-
-#     return decorator
-
-
 class CategoryDAO(BaseDAO):
     model = Category
 
@@ -63,6 +45,7 @@ class ChannelDAO(BaseDAO):
         report_period: Period,
         category_id: int = None,
     ):
+        # TODO replace with alchemy query
         query = f"""select distinct c.channel_id
                     from channel as c
                     left join channel_stat cs on cs.channel_id = c.channel_id and cs.report_period = '{report_period.strf()}'
@@ -78,13 +61,40 @@ class ChannelDAO(BaseDAO):
             return data
 
     @classmethod
+    def get_ids_wo_video(
+        cls,
+        report_period: Period,
+        category_id: int = None,
+    ):
+        # TODO replace with alchemy query
+        query = f"""select c.channel_id, count(*)
+                    from channel as c
+                    left join video v on v.channel_id = c.channel_id and v.published_at_period = '{report_period.strf()}'
+                    where c.status = 1"""
+        query += f" and c.category_id={category_id}" if category_id else ""
+        query += " group by c.channel_id having count(*) = 0"
+        query = text(query)
+        with session_maker() as session:
+            result = session.execute(query)
+            data = result.mappings().all()
+            data = [item["channel_id"] for item in data]
+            return data
+
+    @classmethod
     def search_channel(
-        cls, query: str, max_result: int = 1, order: yt.OrderType = "relevance"
+        cls,
+        query: str,
+        max_result: int = 1,
+        order: yt.OrderType = "relevance",
+        category_id: int = None,
     ):
         data = yt.search_list(
             query=query, type="channel", max_result=max_result, order=order
         )
         if data:
+            if category_id:
+                for item in data:
+                    item["category_id"] = category_id
             cls.add_update_bulk(data, skip_if_exist=True)
         return data
 
@@ -121,6 +131,7 @@ class ChannelDAO(BaseDAO):
         date_step: int = 7,
         order: yt.OrderType = "relevance",
         type: yt.ResourseType = "video",
+        max_result: int = 50,
     ):
 
         data = []
@@ -132,7 +143,7 @@ class ChannelDAO(BaseDAO):
                     published=published_range,
                     type=type,
                     order=order,
-                    max_result=50,
+                    max_result=max_result,
                 )
                 data.extend(videos)
                 logger.debug(f"Fetched {len(videos)} videos")
@@ -193,8 +204,22 @@ class VideoDAO(BaseDAO):
                 }
             )
         data = yt.video_list(video_ids, obj_type="detail")
-        if data:
-            cls.add_update_bulk(data, skip_if_exist=skip_if_exist)
+        if not data:
+            return None
+        video_ids = [item["video_id"] for item in data if item.get("is_short") is None]
+        data_shorts = yt.check_shorts(video_ids)
+        data_shorts = {item["video_id"]: item["is_short"] for item in data_shorts}
+        for item in data:
+            is_short = data_shorts.get(item["video_id"])
+            if item.get("is_short") is None and is_short:
+                item["is_short"] = is_short
+                item["video_url"] = (
+                    "https://www.youtube.com/"
+                    + ("shorts/" if is_short else "watch?v=")
+                    + item["video_id"]
+                )
+
+        cls.add_update_bulk(data, skip_if_exist=skip_if_exist)
         return data
 
     @classmethod
@@ -227,6 +252,7 @@ class VideoDAO(BaseDAO):
         # TODO: check multiple channels query
         for index in range(0, len(channel_ids)):
             channel_id = channel_ids[index]
+            logger.info(f"{index+1}/{len(channel_ids)}: {channel_id}")
             try:
                 videos = yt.search_list(
                     "",
@@ -239,9 +265,6 @@ class VideoDAO(BaseDAO):
                 if videos:
                     cls.add_update_bulk(videos, skip_if_exist=True)
                     data.extend(videos)
-                logger.info(
-                    f"{index}/{len(channel_ids)}: fetched {len(videos)} videos from channel {channel_id}"
-                )
 
             except Exception as e:
                 logger.error(
@@ -258,6 +281,10 @@ class VideoDAO(BaseDAO):
         if isinstance(category_ids, int):
             category_ids = [category_ids]
         for category_id in category_ids:
+            # TODO finish method wo_videos
+            # channel_ids = ChannelDAO.get_ids_wo_video(
+            #     filters={"category_id": category_id, "report_period": period}
+            # )
             channel_ids = ChannelDAO.get_ids(filters={"category_id": category_id})
             cls.search_new_by_channel_period(channel_ids, period)
             logger.info(
@@ -336,6 +363,18 @@ class ReportDAO(BaseDAO):
     model = Report
 
     @classmethod
+    def add_update(cls, val: dict, skip_if_exist: bool = False):
+        obj = cls.find_one_or_none(
+            category_id=val["category_id"], report_period=val["report_period"]
+        )
+        if not obj:
+            return cls.add(**val)
+        elif skip_if_exist:
+            return None
+        else:
+            return cls.update(obj.get("id"), **val)
+
+    @classmethod
     def _query_top_videos(
         cls, period: Period, category_id: int, top_number: int = 3
     ) -> list[SVideo]:
@@ -377,10 +416,12 @@ class ReportDAO(BaseDAO):
         if not data:
             return None
         # TODO replace with add_update
-        res = cls.add(
-            report_period=period.strf(),
-            category_id=category_id,
-            data=data,
+        res = cls.add_update(
+            val={
+                "report_period": period.strf(),
+                "category_id": category_id,
+                "data": data,
+            }
         )
         msg = f"report for {period}, category {category_id}: {res}"
         if not res:
@@ -454,14 +495,3 @@ def init_database(drop_db: bool):
         if drop_db:
             Base.metadata.drop_all(conn)
             Base.metadata.create_all(conn)
-
-
-# res = ReportDAO.metadata()
-# print(res)
-
-# init_database(drop_db=True)
-
-# from logger import print_json, save_json
-
-# res = ReportDAO.get(Period(9), 3)
-# save_json(res)

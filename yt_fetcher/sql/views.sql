@@ -72,7 +72,7 @@ having count(*)>0;
 
 
 -- 3. Prepare data for report by channel, rank channels
-DROP VIEW IF EXISTS channel_period_top;
+DROP VIEW IF EXISTS channel_period_top CASCADE;
 create view channel_period_top as
 WITH total_metrics AS (
 select
@@ -81,7 +81,7 @@ select
     vs.channel_id,
     sum(score) as score,
     sum(videos*is_new) as videos,
-    sum(is_short*is_new) as shorts,
+    sum(videos*is_new*is_short) as shorts,
     sum(duration*is_new) as duration,
     sum(view_count) as view_count,
     sum(like_count) as like_count,
@@ -115,27 +115,6 @@ from channel_period_top as cur
 left join channel_period_top prev on
     prev.channel_id = cur.channel_id
         and prev.report_period = (cur.report_period - INTERVAL '1 month');
-
-
--- 5. Top videos for each channel
-DROP VIEW IF EXISTS channel_period_top_videos;
-create view channel_period_top_videos as
-WITH ranked AS (
-    SELECT *,
-           ROW_NUMBER() OVER (PARTITION BY report_period, channel_id ORDER BY is_short, score DESC) AS rank
-    FROM video_stat_change
-    where is_new=1
-)
-SELECT
-    r.*,
-    v.title,
-    v.video_url,
-    v.thumbnail_url,
-    v.is_clickbait,
-    v.clickbait_comment
-FROM ranked as r
-left join video as v on v.video_id = r.video_id;
-
 
 
 -- 5. Stat changes on channel level
@@ -175,4 +154,25 @@ from channel_period_top_change as c
 left join channel_stat_change cs on c.channel_id = cs.channel_id and c.report_period = cs.report_period
 left join channel as ch on ch.channel_id = c.channel_id
 order by report_period, category_id, rank;
+
+
+-- 7. Top videos for each channel
+DROP VIEW IF EXISTS channel_period_top_videos;
+create view channel_period_top_videos as
+WITH ranked AS (
+    SELECT *,
+           ROW_NUMBER() OVER (PARTITION BY report_period, channel_id ORDER BY is_short, score DESC) AS rank
+    FROM video_stat_change
+    where is_new=1
+)
+SELECT
+    r.*,
+    v.title,
+    v.video_url,
+    v.thumbnail_url,
+    v.is_clickbait,
+    v.clickbait_comment
+FROM ranked as r
+left join video as v on v.video_id = r.video_id;
+
 
