@@ -18,3 +18,11 @@ def get_session():
 
 class Base(DeclarativeBase):
     id: Mapped[int] = mapped_column(primary_key=True)
+
+
+def init_database(drop_db: bool):
+    print("Recreating DB")
+    with engine.begin() as conn:
+        if drop_db:
+            Base.metadata.drop_all(conn)
+            Base.metadata.create_all(conn)

@@ -6,7 +6,7 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from starlette.requests import Request
 
 from app.logger import logger
-from app.dao import ReportDAO
+from app.dao_report import ReportDAO
 
 
 def swagger_monkey_patch(*args, **kwargs):

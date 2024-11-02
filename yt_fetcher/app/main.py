@@ -6,7 +6,8 @@ sys.path.append(os.getcwd())
 
 
 from app.period import Period
-from app.dao import ChannelDAO, ReportDAO, VideoDAO, VideoStatDAO, ChannelStatDAO
+from app.dao_report import ReportDAO
+from app.dao_yt import ChannelDAO, VideoDAO, VideoStatDAO, ChannelStatDAO
 
 
 def main():

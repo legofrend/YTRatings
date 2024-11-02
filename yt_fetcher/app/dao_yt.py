@@ -3,29 +3,14 @@ from datetime import date, datetime, timedelta
 # import locale
 from sqlalchemy import delete, insert, select, text, update
 from sqlalchemy.exc import SQLAlchemyError
-import functools
-
-import asyncio
 
 from app.dao_base import BaseDAO
 from app.database import session_maker, engine
 from app.logger import logger, save_errors
-from app.models import Category, Channel, ChannelStat, Video, VideoStat, Report
-from app.schemas import (
-    SChannelStat,
-    SMetaData,
-    SVideoStat,
-    SVideo,
-    SReport,
-    SChannel,
-)
+from app.models import Channel, ChannelStat, Video, VideoStat
 from app.period import Period
 
 import app.ytapi as yt
-
-
-class CategoryDAO(BaseDAO):
-    model = Category
 
 
 class ChannelDAO(BaseDAO):
@@ -340,158 +325,3 @@ class ChannelStatDAO(BaseDAO):
                 item["report_period"] = report_period.strf()
             cls.add_bulk(data)
         return data
-
-
-def select_view(view_name: str, filters: dict = {}, conditions: list[str] = None):
-    if not conditions:
-        conditions = []
-    query = f"select * from {view_name}"
-    for key, value in filters.items():
-        conditions.append(f"{key} = '{value}'")
-    if conditions:
-        query += " where " + " and ".join(conditions)
-
-    with session_maker() as session:
-        query = text(query)
-        result = session.execute(query)
-        data = result.mappings().all()
-        data = [dict(item) for item in data]
-        return data
-
-
-class ReportDAO(BaseDAO):
-    model = Report
-
-    @classmethod
-    def add_update(cls, val: dict, skip_if_exist: bool = False):
-        obj = cls.find_one_or_none(
-            category_id=val["category_id"], report_period=val["report_period"]
-        )
-        if not obj:
-            return cls.add(**val)
-        elif skip_if_exist:
-            return None
-        else:
-            return cls.update(obj.get("id"), **val)
-
-    @classmethod
-    def _query_top_videos(
-        cls, period: Period, category_id: int, top_number: int = 3
-    ) -> list[SVideo]:
-        data = select_view(
-            "channel_period_top_videos",
-            filters={"report_period": period.strf(), "category_id": category_id},
-            conditions=["rank <= " + str(top_number)],
-        )
-        result = {}
-        for v in data:
-            video_stat = SVideoStat(**v)
-            video = SVideo(stat=video_stat, **v)
-            if not result.get(v["channel_id"]):
-                result[v["channel_id"]] = []
-            result[v["channel_id"]].append(video)
-
-        return result
-
-    @classmethod
-    def query_report_view(cls, period: Period, category_id: int) -> dict:
-        data = select_view(
-            "report_view",
-            filters={"report_period": period.strf(), "category_id": category_id},
-        )
-
-        top_videos = cls._query_top_videos(period, category_id, top_number=5)
-        channels = []
-        for i in data:
-            stat = SChannelStat.model_validate(i)
-            top_video = top_videos.get(i["channel_id"]) or []
-            channel = SChannel(stat=stat, top_videos=top_video, **i)
-            channels.append(channel.model_dump())
-
-        return channels
-
-    @classmethod
-    def build(cls, period: Period, category_id: int):
-        data = cls.query_report_view(period, category_id)
-        if not data:
-            return None
-        # TODO replace with add_update
-        res = cls.add_update(
-            val={
-                "report_period": period.strf(),
-                "category_id": category_id,
-                "data": data,
-            }
-        )
-        msg = f"report for {period}, category {category_id}: {res}"
-        if not res:
-            logger.error(f"Cannot add {msg}")
-            return None
-
-        logger.info(f"Added {msg}")
-        return res
-
-    @classmethod
-    def get(cls, period: Period | date | str, category_id: int) -> SReport:
-        if isinstance(period, (str, date)):
-            period = Period.parse(period)
-
-        data = cls.find_one_or_none(
-            report_period=period.strf(), category_id=category_id
-        )
-        if not data:
-            return None
-        id = data["id"]
-        data = data["data"]
-        scale = data[0]["stat"]["score"] + max(0, -data[0]["stat"]["score_change"])
-
-        category = CategoryDAO().find_by_id(category_id)
-
-        # locale.setlocale(locale.LC_ALL, "Russian")
-        # display_period = period._date.strftime("%B %Y")
-        result = {
-            "id": id,
-            "period": period.strf(),
-            # "display_period": period._date.strftime("%B %Y"),
-            "category_id": category_id,
-            "category": category,
-            "scale": scale,
-            "data": data,
-        }
-
-        return SReport(**result)
-
-    @classmethod
-    def metadata(cls) -> list[SMetaData]:
-        with session_maker() as session:
-            query = (
-                select(Category.id, Category.name, Report.report_period)
-                .join(Category, Category.id == Report.category_id, isouter=True)
-                .order_by(Category.id, Report.report_period.asc())
-            )
-            results = session.execute(query)
-            # results = result.mappings().all()
-
-        data_dict = {}
-        for id, name, report_period in results:
-
-            if id not in data_dict:
-                data_dict[id] = {"name": name, "periods": []}
-            if report_period is not None:  # Проверяем на None, чтобы не добавлять его
-                data_dict[id]["periods"].append(report_period)
-
-        # Превращаем данные в список SMetaData
-        meta_data_list = [
-            SMetaData(id=int(id), name=info["name"], periods=info["periods"])
-            for id, info in data_dict.items()
-        ]
-
-        return meta_data_list
-
-
-def init_database(drop_db: bool):
-    print("Recreating DB")
-    with engine.begin() as conn:
-        if drop_db:
-            Base.metadata.drop_all(conn)
-            Base.metadata.create_all(conn)
