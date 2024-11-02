@@ -6,8 +6,15 @@ const props = defineProps(['stat'])
 // console.log(props.stat)
 
 const ValDisplay = (value) => {
-    var val = (Math.round(value / 10 ** 6 * 10) / 10);
-    return val.toFixed(1);
+    if (Math.abs(value) > 10 ** 6) {
+        var val = (Math.round(value / 10 ** 6 * 10) / 10);
+        return val.toFixed(1) + 'M';
+    }
+    if (Math.abs(value) > 1000) {
+        var val = (Math.round(value / 10 ** 3));
+        return val.toFixed(0) + 'K';
+    }
+    return value
 }
 
 const likeShare = computed(() => {
@@ -34,13 +41,13 @@ function formatTime(seconds) {
 
 <template>
     <div class="flex flex-auto space-x-1 items-center">
-        <div title="Взвешенные просмотры (клипы с коэф. 0.1)">👁{{ ValDisplay(stat.score) }}M</div>
+        <div title="Взвешенные просмотры (клипы с коэф. 0.1)">👁{{ ValDisplay(stat.score) }}</div>
         <div v-if="stat.score_change">
-            (<value-change :value="ValDisplay(stat.score_change)" />)
+            (<value-change :value="stat.score_change" />)
         </div>
         <div title="Отноешние Лайки/Просмотры">👍{{ likeShare }}%</div>
         <!-- <div title="Комментарии" v-if="stat.comment_count">🗨{{ ValDisplay(stat.comment_count) }}M</div> -->
-        <div title="Подписчики" v-if="stat.subscriber_count">👤{{ ValDisplay(stat.subscriber_count) }}M</div>
+        <div title="Подписчики" v-if="stat.subscriber_count">👤{{ ValDisplay(stat.subscriber_count) }}</div>
         <div title="Количество новых видео за месяц" v-if="stat.videos" class="flex items-center"><img class="h-3 mr-1"
                 src="/img/video.svg" alt="videos"> {{ stat.videos - stat.shorts }}
         </div>

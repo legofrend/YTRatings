@@ -1,25 +1,48 @@
-from app.services import *
+import os
+import sys
+from datetime import date, datetime
+
+sys.path.append(os.getcwd())
+
+
+from app.period import Period
+from app.dao import ChannelDAO, ReportDAO, VideoDAO, VideoStatDAO, ChannelStatDAO
 
 
 def main():
-    rebuild_reports()
+    category_id = 5
+    period = Period(10)
+    per_range = [date(2024, 8, 1), date(2024, 10, 31)]
 
-    # videos_ids = VideoDAO.get_videos_wo_stat()
-    # res = VideoDAO.find_all(duration=None)
-    # videos_ids = [item["video_id"] for item in res]
-    # print(len(videos_ids))
+    start_dt = datetime.now()
+    print("Start", start_dt)
 
-    # ytapi.get_video_stat(videos_ids)
+    # ChannelDAO.search_by_keywords(
+    #     "Новости и обзоры нейросетей",
+    #     iterations=4,
+    #     date_step=30,
+    #     type="channel",
+    #     max_result=50,
+    # )
 
-    # ytapi.get_video_detail(videos_ids)
+    # names = """""".split("\n")
+    # print(names)
 
-    # ytapi.get_channel_detail(["UCcX5TJjQsRN4Bg-EVc5Dcfg"])
-    # res = ytapi.get_channels_by_keywords("юмор сатира шутки")
-    # save_json(res, "out.json")
+    # ChannelStatDAO.update_stat(report_period=period, category_id=category_id)
 
-    # update_info_for_period(filter={"status": 1, "category_id": 3})
+    # VideoDAO.search_new_by_category_period(period=period, category_ids=category_id)
+    # or
+    # VideoDAO.search_new_by_channel_period(period=period, channel_ids=names)
 
-    # ytapi.check_is_short()
+    # VideoDAO.update_detail()
+
+    # VideoStatDAO.update_stat(report_period=period, category_id=category_id)
+    for category_id in [1, 5, 6, 7]:
+        ReportDAO.build(period, category_id)
+
+    print("Finish after ", datetime.now() - start_dt)
+
+    return True
 
 
 if __name__ == "__main__":

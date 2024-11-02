@@ -1,21 +1,25 @@
+import asyncio
 from typing import Literal
 from googleapiclient.discovery import build
 from datetime import datetime, timedelta
 import re
-import functools
-
-import asyncio
 import aiohttp
 
 from app.logger import logger
 from app.config import settings
-from app.period import Period
-from app.dao import VideoDAO, VideoStatDAO, ChannelStatDAO, ChannelDAO
 
 
 YT_TIME_REGEX = re.compile(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?")
 DATETIME_YT_F = "%Y-%m-%dT%H:%M:%SZ"
 DATETIME_YT_F2 = "%Y-%m-%dT%H:%M:%S.%fZ"
+
+OrderType = Literal["date", "rating", "relevance", "title", "videoCount", "viewCount"]
+# videoCount – Channels are sorted in descending order of their number of uploaded videos.
+# viewCount – Resources are sorted from highest to lowest number of views. For live broadcasts, videos are sorted by number of concurrent viewers while the broadcasts are ongoing.
+ResourseType = Literal["video", "channel", "playlist"]
+TableType = Literal[
+    "channel", "video", "channel_stat", "video_stat", "video_detail", "channel_detail"
+]
 
 youtube = build(
     "youtube", "v3", developerKey=settings.YT_API_KEY, cache_discovery=False
@@ -41,37 +45,10 @@ def parse_yt_time(s):
     return secs
 
 
-OrderType = Literal["date", "rating", "relevance", "title", "videoCount", "viewCount"]
-# videoCount – Channels are sorted in descending order of their number of uploaded videos.
-# viewCount – Resources are sorted from highest to lowest number of views. For live broadcasts, videos are sorted by number of concurrent viewers while the broadcasts are ongoing.
-ResourseType = Literal["video", "channel", "playlist"]
-TableType = Literal[
-    "channel", "video", "channel_stat", "video_stat", "video_detail", "channel_detail"
-]
-
-
-def store_db(dao_class, mode: Literal["add_update", "add_skip", "add"] = "add_update"):
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            # Получаем результат выполнения функции
-            data = func(*args, **kwargs)
-            if data:
-                if mode == "add":
-                    dao_class.add_bulk(data)
-                else:
-                    dao_class.add_update_bulk(data, skip_if_exist=(mode == "add_skip"))
-            return data
-
-        return wrapper
-
-    return decorator
-
-
-def get_search_list(
+def search_list(
     query: str,
     max_result: int = 50,
-    published: list | datetime = [],
+    published: list[datetime] | datetime = [],
     order: OrderType = "",
     type: ResourseType = "video",
     channel_id: str = None,
@@ -85,16 +62,11 @@ def get_search_list(
         "maxResults": min(max_result, 50),
     }
     if published:
-        published_after = (
-            dt2ytfmt(published)
-            if isinstance(published, datetime)
-            else dt2ytfmt(published[0])
-        )
-        published_before = (
-            dt2ytfmt(published[1])
-            if not isinstance(published, datetime) and len(published) > 1
-            else None
-        )
+        if isinstance(published, list):
+            published_after, published_before = (dt2ytfmt(d) for d in published)
+        else:
+            published_after = dt2ytfmt(published)
+
         if published_after:
             params["publishedAfter"] = published_after
         if published_before:
@@ -121,7 +93,7 @@ def get_search_list(
                 extra={"query": query, "params": params, "response": response},
                 exc_info=True,
             )
-            break
+            return data
 
         # Получение следующей страницы
         next_page_token = response.get("nextPageToken")
@@ -132,6 +104,7 @@ def get_search_list(
         params["pageToken"] = next_page_token
 
     total_results = response["pageInfo"].get("totalResults", 0)
+
     if total_results > len(data):
         logger.debug(
             "Seems we didn't fetch all data",
@@ -145,20 +118,7 @@ def get_search_list(
     return data
 
 
-@store_db(ChannelDAO, mode="add_skip")
-def find_channel(query: str, max_result: int = 1, order: OrderType = "relevance"):
-    data = get_search_list(
-        query=query, type="channel", max_result=max_result, order=order
-    )
-    return data
-
-
-def find_channels(names: list):
-    data = [find_channel(name) for name in names]
-    return data
-
-
-def get_stat(
+def channel_or_video_list(
     ids: list | str,
     obj_type: Literal["channel_stat", "video_stat", "channel_detail", "video_detail"],
 ):
@@ -203,27 +163,21 @@ def get_stat(
     return data
 
 
-@store_db(VideoStatDAO, mode="add")
-def get_video_stat(video_ids: list | str):
-    return get_stat(video_ids, "video_stat")
+def channel_list(
+    ids: list | str,
+    obj_type: Literal["stat", "detail"],
+):
+    return channel_or_video_list(ids, obj_type="channel_" + obj_type)
 
 
-@store_db(VideoDAO, mode="add_update")
-def get_video_detail(video_ids: list | str):
-    return get_stat(video_ids, "video_detail")
+def video_list(
+    ids: list | str,
+    obj_type: Literal["stat", "detail"],
+):
+    return channel_or_video_list(ids, obj_type="video_" + obj_type)
 
 
-@store_db(ChannelStatDAO, mode="add")
-def get_channel_stat(channel_ids: list | str):
-    return get_stat(channel_ids, "channel_stat")
-
-
-@store_db(ChannelDAO, mode="add_update")
-def get_channel_detail(channel_ids: list | str):
-    return get_stat(channel_ids, "channel_detail")
-
-
-def parse_response(response, type: TableType):
+def parse_response(response, type: TableType) -> list[dict]:
     data = []
     for item in response.get("items"):
         info = item.get("snippet")
@@ -235,9 +189,10 @@ def parse_response(response, type: TableType):
                 published_dt = datetime.strptime(
                     info.get("publishedAt"), DATETIME_YT_F2
                 )
+                # TODO: check
+            published_period_dt = published_dt.replace(day=1)
 
         if type == "video":
-            # TODO добавить is_short
             is_short = 0
             url = "https://www.youtube.com/" + ("watch?v=" if is_short else "shorts/")
             val = {
@@ -246,6 +201,7 @@ def parse_response(response, type: TableType):
                 "title": item["snippet"]["title"],
                 "description": item["snippet"]["description"],
                 "published_at": published_dt,
+                "published_at_period": published_period_dt,
                 # shorts/item["id"]["videoId"]
                 "video_url": url + item["id"]["videoId"],
                 "thumbnail_url": item["snippet"]["thumbnails"]["high"]["url"],
@@ -300,77 +256,7 @@ def parse_response(response, type: TableType):
     return data
 
 
-@store_db(VideoDAO, mode="add_skip")
-def get_videos_by_period(channel_ids: list | str, period: Period | list[datetime]):
-    if isinstance(channel_ids, str):
-        channel_ids = [channel_ids]
-
-    if isinstance(period, Period):
-        period = period.as_range()
-
-    if isinstance(period, list) and len(period) != 2:
-        raise Exception("Invalid period")
-
-    data = []
-    for index in range(0, len(channel_ids)):
-        channel_id = channel_ids[index]
-        logger.info(f"{round(index / len(channel_ids)*100)}%")
-        try:
-            videos = get_search_list(
-                "",
-                published=period,
-                type="video",
-                channel_id=channel_id,
-                order="viewCount",
-                max_result=1000,
-            )
-            data.extend(videos)
-            logger.info(f"Fetched {len(videos)} videos from channel {channel_id}")
-
-        except Exception as e:
-            logger.error(
-                f"Can't get videos for channel id {index}: {channel_id}", exc_info=True
-            )
-
-    return data
-
-
-def get_channels_by_keywords(
-    query: str,
-    date_from: datetime = datetime.now(),
-    iterations: int = 8,
-    date_step: int = 7,
-    order: OrderType = "relevance",
-    type: ResourseType = "video",
-):
-
-    data = []
-    for _ in range(0, iterations):
-        try:
-            published_range = [date_from, date_from - timedelta(days=date_step)]
-            videos = get_search_list(
-                query,
-                published=published_range,
-                type=type,
-                order=order,
-                max_result=50,
-            )
-            data.extend(videos)
-            logger.info(f"Fetched {len(videos)} videos")
-
-        except Exception as e:
-            logger.error(f"Can't get videos", exc_info=True)
-
-        date_from -= timedelta(days=date_step)
-
-    unique_channel_ids = set(video["channel_id"] for video in data)
-    unique_channel_ids = list(unique_channel_ids)
-    logger.info(f"Get {len(unique_channel_ids)} unique channels")
-
-    return get_channel_detail(unique_channel_ids)
-
-
-async def check_short(video_id):
+async def check_short(video_id: str):
     url = f"https://www.youtube.com/shorts/{video_id}"
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as response:
@@ -381,36 +267,37 @@ async def check_short(video_id):
             else:
                 logger.error(f"{video_id=}, status={response.status}")
                 is_short = None  # Не удалось определить
-            return video_id, is_short
-
-
-async def main(video_ids):
-    tasks = [check_short(video_id) for video_id in video_ids]
-    return await asyncio.gather(*tasks)
-
-
-def check_is_short():
-    import time
-
-    res = VideoDAO.find_all(is_short=None)
-    step = 100
-    video_ids = [item["video_id"] for item in res]
-    total = len(video_ids)
-
-    i = 0
-    while i < total:
-        results = asyncio.run(main(video_ids[i : (i + step)]))
-        for video_id, is_short in results:
             url = (
                 "https://www.youtube.com/"
                 + ("shorts/" if is_short else "watch?v=")
                 + video_id
             )
-            VideoDAO.update(video_id, "video_id", is_short=is_short, video_url=url)
+            val = {"video_id": video_id, "is_short": is_short, "video_url": url}
+            return val
+
+
+def check_shorts(video_ids: list[str]):
+
+    import time
+
+    async def main(video_ids):
+        tasks = [check_short(video_id) for video_id in video_ids]
+        return await asyncio.gather(*tasks)
+
+    step = 100
+    total = len(video_ids)
+    data = []
+    i = 0
+    while i < total:
+        results = asyncio.run(main(video_ids[i : (i + step)]))
+        data.extend(results)
+
         i += step
         logger.info(f"Checking shorts {i}/{total}")
         time.sleep(1)
 
+    return data
 
-check_is_short()
+
+# check_is_short()
 # print("OK")
