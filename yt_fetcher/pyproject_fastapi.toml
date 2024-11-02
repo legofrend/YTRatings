@@ -14,8 +14,6 @@ asyncpg = "^0.29.0"
 psycopg2 = "^2.9.10"
 fastapi = "^0.115.3"
 uvicorn = "^0.32.0"
-google-api-python-client = "^2.138.0"
-google-auth-oauthlib = "^1.2.1"
 
 
 
