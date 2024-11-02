@@ -164,29 +164,35 @@ onMounted(() => {
     <p v-if="loading">Loading...</p>
     <p v-else-if="error">{{ error }}</p>
     <div v-else>
-      <h2 class="text-center text-3xl m-3">{{ data.category.title }}</h2>
-      <div class="flex justify-center">
+
+      <!-- Navigation -->
+      <div class="flex justify-left border rounded shadow select-none">
         <select v-model="currentCategoryId" @change="changeCategory($event.target.value)" name="category"
-          class="text-center text-xl m-3 cursor-pointer">
+          class="text-center text-base m-3 cursor-pointer">
           <option v-for="category in metaData" :key="category.id" :value="category.id">{{ category.name }}
           </option>
         </select>
 
         <div class="flex justify-center items-center select-none">
-          <img src="/img/arrowLeft.svg" class="h-6 mx-3 cursor-pointer" @click="changePeriod(-1)" />
+          <img src="/img/arrowLeft.svg" class="h-4 mx-1 cursor-pointer" @click="changePeriod(-1)" />
 
-          <h3 class="text-center text-xl m-3">{{ periodDisplay }}</h3>
-          <img src="/img/arrowLeft.svg" class="h-6 mx-3 cursor-pointer rotate-180" @click="changePeriod(1)" />
+          <h3 class="text-center text-base m-3">{{ periodDisplay }}</h3>
+          <img src="/img/arrowLeft.svg" class="h-4 mx-1 cursor-pointer rotate-180" @click="changePeriod(1)" />
         </div>
       </div>
-      <Chart :data="data" />
-    </div>
-    <info-block header="Методика" class="text-xs  mt-10">Рейтинг на основе суммы просмотров на канале по видео и клипам
-      двух
-      последних месяцев. Клипы (shorts) учитываются с коэффициентом 1/10. <p>Критерии выбора каналов: {{
-        data.category.description }}</p>
 
-    </info-block>
+      <h2 class="text-center text-3xl m-3">{{ data.category.title }}</h2>
+
+      <!-- Chart -->
+      <Chart :data="data" />
+      <info-block header="Методика" class="text-xs  mt-10">Рейтинг на основе суммы просмотров на канале по видео и
+        клипам
+        двух
+        последних месяцев. Клипы (shorts) учитываются с коэффициентом 1/10. <p>Критерии выбора каналов: {{
+          data.category.description }}</p>
+
+      </info-block>
+    </div>
     <info-block header="Предложить свой канал или тему" class="text-lg mt-3"><feedback-form /></info-block>
 
   </div>

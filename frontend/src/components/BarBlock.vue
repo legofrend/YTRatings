@@ -14,7 +14,7 @@ const itemStyle = props.stat.score_change > 0 ? 'bg-green-200' : 'bg-white borde
 </script>
 
 <template>
-    <div class="lg:flex  text-sm hidden pr-3">
+    <div class="lg:flex  text-sm hidden pr-3 mt-1 select-none">
         <!-- justify-center items-center -->
         <div :style="`width: ${bar1}%`" class="h-6 bg-green-400 flex items-center px-1 border">
         </div>

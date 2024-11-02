@@ -26,10 +26,10 @@ console.log(props.data)
             </ul>
         </main>
         <div class="text-xl flex justify-center mt-3 gap-3 select-none">
-            <button class="border border-gray-500 px-2"
+            <button class="border border-gray-300 shadow px-2 rounded"
                 @click="showNumber += showNumber < data.data.length ? 10 : 0">Больше</button>
             <!-- ⏬⏫ -->
-            <button class="border border-gray-500 px-2"
+            <button class="border border-gray-300 px-2 rounded shadow"
                 @click="showNumber = Math.max(showNumber - 10, 10)">Меньше</button>
         </div>
 
