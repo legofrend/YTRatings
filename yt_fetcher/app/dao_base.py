@@ -56,6 +56,7 @@ class BaseDAO:
         errors = []
         stored = []
         updated = []
+        # print(len(data))
         for d in data:
             obj = cls.find_one_or_none(**{index: d[index]})
             if not obj:
@@ -149,4 +150,3 @@ class BaseDAO:
             res = session.execute(query)
             session.commit()
             return res.mappings().all()
-
