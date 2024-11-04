@@ -62,7 +62,7 @@ async function fetchData(category_id, period) {
 
 
 async function fetchMetaData() {
-  console.log('fetchMetaData testing 1')
+  console.log('fetchMetaData')
   try {
     const response = await axios.get('metadata/');
     console.log('response', response)
@@ -73,31 +73,7 @@ async function fetchMetaData() {
   } finally {
   }
 
-  console.log('fetchMetaData testing 2')
-  try {
-    const response = axios.get(`${axios.defaults.baseURL}metadata/`);
-    console.log('response', response)
-    metaData.value = response.data;
-    // console.log('metaData', metaData.value)
 
-    error.value = null
-  } catch (err) {
-    error.value = err.message;
-  } finally {
-  }
-
-  console.log('fetchMetaData testing 3')
-  try {
-    const response = axios.get('https://ytr.o2t4.ru/api/ytr/metadata/');
-    console.log('response', response)
-    metaData.value = response.data;
-    // console.log('metaData', metaData.value)
-
-    error.value = null
-  } catch (err) {
-    error.value = err.message;
-  } finally {
-  }
 
 }
 
