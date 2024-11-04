@@ -42,7 +42,7 @@ async function fetchData(category_id, period) {
   console.log('fetchData: category_id=', category_id, ', period=', period)
 
   try {
-    const response = await axios.get('report', {
+    const response = await axios.get('report/', {
       params: {
         category_id: category_id,
         period: period
@@ -62,15 +62,43 @@ async function fetchData(category_id, period) {
 
 
 async function fetchMetaData() {
+  console.log('fetchMetaData testing 1')
   try {
-    const response = await axios.get('metadata');
-    // const response = axios.get(`${axios.defaults.baseURL}metadata`);
+    const response = await axios.get('metadata/');
+    console.log('response', response)
     metaData.value = response.data;
     // console.log('metaData', metaData.value)
   } catch (err) {
     error.value = err.message;
   } finally {
   }
+
+  console.log('fetchMetaData testing 2')
+  try {
+    const response = axios.get(`${axios.defaults.baseURL}metadata/`);
+    console.log('response', response)
+    metaData.value = response.data;
+    // console.log('metaData', metaData.value)
+
+    error.value = null
+  } catch (err) {
+    error.value = err.message;
+  } finally {
+  }
+
+  console.log('fetchMetaData testing 3')
+  try {
+    const response = axios.get('https://ytr.o2t4.ru/api/ytr/metadata/');
+    console.log('response', response)
+    metaData.value = response.data;
+    // console.log('metaData', metaData.value)
+
+    error.value = null
+  } catch (err) {
+    error.value = err.message;
+  } finally {
+  }
+
 }
 
 function changePeriod(change) {
@@ -145,11 +173,12 @@ onMounted(() => {
   if (window.location.origin.endsWith(':5173')) {
     axios.defaults.baseURL = window.location.origin.replace(':5173', ':5000');
   }
-  //  else {
-  //   axios.defaults.baseURL = 'https://o2t4.ru';
-  // }
+  else {
+    axios.defaults.baseURL = 'https://ytr.o2t4.ru';
+  }
   axios.defaults.baseURL += '/api/ytr/'
-  console.log(axios.defaults.baseURL)
+  console.log('baseURL', axios.defaults.baseURL)
+
   // Установка withCredentials в true для передачи куки
   axios.defaults.withCredentials = true;
 
