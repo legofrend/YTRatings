@@ -6,11 +6,11 @@ const props = defineProps(['stat'])
 // console.log(props.stat)
 
 const ValDisplay = (value) => {
-    if (Math.abs(value) > 10 ** 6) {
+    if (Math.abs(value) >= 10 ** 6) {
         var val = (Math.round(value / 10 ** 6 * 10) / 10);
         return val.toFixed(1) + 'M';
     }
-    if (Math.abs(value) > 1000) {
+    if (Math.abs(value) >= 1000) {
         var val = (Math.round(value / 10 ** 3));
         return val.toFixed(0) + 'K';
     }

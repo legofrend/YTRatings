@@ -18,8 +18,8 @@ class ChannelDAO(BaseDAO):
 
     @classmethod
     def get_ids(cls, filters: dict = {}):
-        if not "status" in filters.keys():
-            filters["status"] = 1
+        # if not "status" in filters.keys():
+        #     filters["status"] = 1
         data = cls.find_all(**filters)
         ids = [d.channel_id for d in data]
         return ids
@@ -34,7 +34,7 @@ class ChannelDAO(BaseDAO):
         query = f"""select distinct c.channel_id
                     from channel as c
                     left join channel_stat cs on cs.channel_id = c.channel_id and cs.report_period = '{report_period.strf()}'
-                    where cs.id is null 
+                    where cs.id is null and (c.status > 0 or c.status is null)
                 """
         if category_id:
             query += f" and c.category_id={category_id}"

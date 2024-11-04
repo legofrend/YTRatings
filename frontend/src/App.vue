@@ -64,6 +64,7 @@ async function fetchData(category_id, period) {
 async function fetchMetaData() {
   try {
     const response = await axios.get('metadata');
+    // const response = axios.get(`${axios.defaults.baseURL}metadata`);
     metaData.value = response.data;
     // console.log('metaData', metaData.value)
   } catch (err) {
@@ -143,8 +144,8 @@ onMounted(() => {
   axios.defaults.baseURL = window.location.origin;
   if (window.location.origin.endsWith(':5173')) {
     axios.defaults.baseURL = window.location.origin.replace(':5173', ':5000');
-    // for development only
-    // axios.defaults.baseURL = 'https://o2t4.ru/api/';
+  } else {
+    axios.defaults.baseURL = 'https://o2t4.ru';
   }
   axios.defaults.baseURL += '/api/ytr/'
   console.log(axios.defaults.baseURL)
