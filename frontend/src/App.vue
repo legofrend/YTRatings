@@ -145,9 +145,9 @@ onMounted(() => {
   if (window.location.origin.endsWith(':5173')) {
     axios.defaults.baseURL = window.location.origin.replace(':5173', ':5000');
   }
-  //  else {
-  //   axios.defaults.baseURL = 'https://o2t4.ru';
-  // }
+  else {
+    axios.defaults.baseURL = 'https://ytr.o2t4.ru';
+  }
   axios.defaults.baseURL += '/api/ytr/'
   console.log(axios.defaults.baseURL)
   // Установка withCredentials в true для передачи куки
