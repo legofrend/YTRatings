@@ -19,8 +19,8 @@ const ValDisplay = (value) => {
 
 const icon = (value) => {
     const val = ValDisplay(value)
-    console.log('value', value)
-    console.log('ValDisplay', val)
+    // console.log('value', value)
+    // console.log('ValDisplay', val)
     return value > 0 ? '▲' + val : value < 0 ? '▼' + val : '-';
 }
 // ⬆⬇

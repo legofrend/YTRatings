@@ -1,14 +1,11 @@
 from typing import Optional
-from unicodedata import digit
 from sqlalchemy.orm import mapped_column, Mapped, relationship
 from sqlalchemy import (
     BigInteger,
     Date,
     func,
-    UniqueConstraint,
     Computed,
     ForeignKey,
-    text,
 )
 from sqlalchemy.dialects.postgresql import JSON, JSONB
 
@@ -19,38 +16,6 @@ from app.database import Base
 
 # if TYPE_CHECKING:
 # Убирает предупреждения отсутствия импорта и неприятные подчеркивания в PyCharm и VSCode
-
-
-class Category(Base):
-    __tablename__ = "category"
-    active: Mapped[bool] = mapped_column(default=True)
-    name: Mapped[str | None]
-    title: Mapped[str | None]
-    description: Mapped[str | None]
-
-
-class Channel(Base):
-    __tablename__ = "channel"
-    category_id: Mapped[Optional[int]]
-    channel_id: Mapped[str] = mapped_column(unique=True)
-    channel_title: Mapped[str]
-    description: Mapped[Optional[str]]
-    published_at: Mapped[Optional[datetime]]
-    thumbnail_url: Mapped[Optional[str]]
-    custom_url: Mapped[Optional[str]]
-    status: Mapped[Optional[int]]
-
-
-class ChannelStat(Base):
-    __tablename__ = "channel_stat"
-    channel_id: Mapped[str] = mapped_column(ForeignKey("channel.channel_id"))
-    data_at: Mapped[datetime]
-    report_period: Mapped[Optional[date]] = mapped_column(
-        Date, default=func.date_trunc("month", func.current_date()).cast(Date)
-    )
-    channel_view_count: Mapped[Optional[int]] = mapped_column(BigInteger)
-    subscriber_count: Mapped[Optional[int]] = mapped_column(BigInteger)
-    video_count: Mapped[Optional[int]]
 
 
 class Video(Base):
@@ -84,16 +49,6 @@ class VideoStat(Base):
     )
     prev_period: Mapped[date] = mapped_column(
         Computed("report_period - interval '1 month' ")
-    )
-
-
-class Report(Base):
-    __tablename__ = "report"
-    report_period: Mapped[date]
-    category_id: Mapped[int] = mapped_column(ForeignKey("category.id"))
-    data: Mapped[dict] = mapped_column(JSONB)
-    __table_args__ = (
-        UniqueConstraint("report_period", "category_id", name="uq_period_category"),
     )
 
 

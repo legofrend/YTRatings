@@ -1,26 +1,16 @@
-from datetime import date, datetime, timedelta
+from datetime import date
 
-# import locale
 from sqlalchemy import delete, insert, select, text, update
 
 
-from app.dao_base import BaseDAO
+from app.dao import BaseDAO
 from app.database import session_maker, engine
 from app.logger import logger, save_errors
-from app.models import Category, Report
-from app.schemas import (
-    SChannelStat,
-    SMetaData,
-    SVideoStat,
-    SVideo,
-    SReport,
-    SChannel,
-)
-from app.period import Period
-
-
-class CategoryDAO(BaseDAO):
-    model = Category
+from app.report.models import Report
+from app.report.schemas import SMetaData, SReport
+from app.channel.schemas import SChannel, SChannelStat
+from app.video.schemas import SVideo, SVideoStat
+from app.period.period import Period
 
 
 def select_view(view_name: str, filters: dict = {}, conditions: list[str] = None):
@@ -168,5 +158,3 @@ class ReportDAO(BaseDAO):
         ]
 
         return meta_data_list
-
-

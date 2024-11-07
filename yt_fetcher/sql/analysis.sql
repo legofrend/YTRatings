@@ -134,10 +134,11 @@ order by c.id;
 
 
 -- Extract videos for a channel
-select v.channel_id, v.published_at_period, v.title, v.duration, v.is_short, v.video_url, vs.report_period,  vs.view_count, vs.like_count, vs.comment_count
+select v.channel_id, v.published_at_period, v.published_at, v.title, v.duration, v.is_short, v.video_url, vs.report_period,  vs.view_count, vs.like_count, vs.comment_count
 from video_stat as vs
 left join video v on vs.video_id = v.video_id
-where v.channel_id = 'UC6cqazSR6CnVMClY0bJI0Lg'
+where v.channel_id = 'UCWAIvx2yYLK_xTYD4F2mUNw'
+order by v.published_at
 
 
 -- Get channels without videos for the period

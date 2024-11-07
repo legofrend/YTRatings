@@ -5,13 +5,23 @@ from datetime import date, datetime
 sys.path.append(os.getcwd())
 
 
-from app.period import Period
-from app.dao_report import ReportDAO
-from app.dao_yt import ChannelDAO, VideoDAO, VideoStatDAO, ChannelStatDAO
+from app.period.period import Period
+from app.report.dao import ReportDAO
+from app.video.dao import VideoDAO, VideoStatDAO
+from app.channel.dao import ChannelDAO, ChannelStatDAO
+
+
+# Categories
+# 1	Политика
+# 2	SC2
+# 3	Юмор
+# 5	Авто
+# 6	Кино
+# 7	Нейросети
 
 
 def main():
-    category_id = 7
+    category_id = 1
     period = Period(10)
     per_range = [date(2024, 8, 1), date(2024, 10, 31)]
 
@@ -26,29 +36,15 @@ def main():
     #     max_result=150,
     # )
 
-    ids = """UC_GgOplL884a5epC_tLmZ5g
-UCvrc5UdweQwmrDVSeWruCLQ
-UCY8x6xRApsKTneT3FSlcoFg
-UC_jJJRp6yZTvWvtLIK6a4Rg
-UCZiWrEnhyCpkT8aE-vkC1VA
-UCFYiDR-Ecy3G_mflvNv8ceQ
-UC_lquTU9KW6qvVwXxpFt3Og
-UC7Cct_zb6oG2FK1d2nrFpGA
-UCgNCgZf8M28zx6BYIrnfBng
-UCtvSwlo9m_a9zX7DBuyZXIA
-UCX2O3YjU2B7Ez7OcRNJCC4Q
-UC4OcySZ8uQ6xt1fh4qhUN8g
-UCZ6Fos-CqOFKdAUXXkbZ_fw
-UCEV4Gi5cTLmYTTIctI7O4IA
-UCaC5Ds-cUDAHi6CfjzG5NMw
-UCZxYHMdHS0QfD6l9wn2yzOw
-UC9q-B7BLekxjrDyOXDtImVQ
-UCZcfRX8LbGqFOW06Nf0tHnQ
-UCL9qmgOJwczxpMmtgKwDDeA
-UCTU7JOKrjXOiN0ifL5BGSRA
-""".split(
+    ids = """UCWAIvx2yYLK_xTYD4F2mUNw
+UC0lT9K8Wfuc1KPqm6YjRf1A
+UCG4yz4wtp2E5S62L06yqC9w""".split(
         "\n"
     )
+    names = "@zhivoygvozd @ildarauto @AcademeG".split(" ")  # @zhivoygvozd
+    # for name in names[:1]:
+    #     ChannelDAO.search_channel(name, category_id=category_id)
+
     # print(names)
     # ChannelDAO.update_detail()
 
@@ -64,9 +60,9 @@ UCTU7JOKrjXOiN0ifL5BGSRA
 
     # VideoStatDAO.update_stat(report_period=period, category_id=category_id)
 
-    ReportDAO.build(period, category_id)
+    # ReportDAO.build(period, category_id)
 
-    # for category_id in [1, 5, 6, 7]:
+    # for category_id in [1, 5]:
     #     ReportDAO.build(period, category_id)
 
     print("Finish after ", datetime.now() - start_dt)

@@ -5,7 +5,7 @@ const props = defineProps(['data'])
 
 const showNumber = ref(10)
 
-console.log(props.data)
+// console.log(props.data)
 
 </script>
 

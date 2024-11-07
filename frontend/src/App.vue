@@ -62,7 +62,7 @@ async function fetchData(category_id, period) {
 
 
 async function fetchMetaData() {
-  console.log('fetchMetaData')
+  // console.log('fetchMetaData')
   try {
     const response = await axios.get('metadata/');
     console.log('response', response)
@@ -121,6 +121,11 @@ watch(
 async function initialize() {
   loading.value = true;
 
+  // Взять параметры из адресной строки
+  const urlParams = new URLSearchParams(window.location.search);
+  const paramValue = urlParams.get('category_id');
+  console.log(paramValue);
+
   await fetchMetaData();
   const localCurrentCategoryId = localStorage.getItem('currentCategoryId');
   const categoryId = localCurrentCategoryId ? Number(localCurrentCategoryId) : 1;
@@ -149,9 +154,9 @@ onMounted(() => {
   if (window.location.origin.endsWith(':5173')) {
     axios.defaults.baseURL = window.location.origin.replace(':5173', ':5000');
   }
-  else {
-    axios.defaults.baseURL = 'https://ytr.o2t4.ru';
-  }
+  // else {
+  //   axios.defaults.baseURL = 'https://ytr.o2t4.ru';
+  // }
   axios.defaults.baseURL += '/api/ytr/'
   console.log('baseURL', axios.defaults.baseURL)
 
