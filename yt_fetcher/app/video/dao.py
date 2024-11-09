@@ -166,6 +166,23 @@ class VideoDAO(BaseDAO):
             if not os.path.exists(full_path):
                 download_file(file_url, full_path)
 
+    @classmethod
+    def update_clickbait(cls, data: list[dict]):
+        # TODO rewrite this method
+        # is_click_bait = [
+        #     {
+        #         "video_id": "b4PjXdjVRxk",
+        #         "is_clickbait": 1,
+        #         "clickbait_comment": "Заголовок провокационен и использует драматические элементы, чтобы привлечь внимание."
+        #     }
+        # ]
+        for item in data:
+            try:
+                id = item.pop("video_id")
+                VideoDAO.update(id, "video_id", **item)
+            except Exception as e:
+                logger.error(e)
+
 
 class VideoStatDAO(BaseDAO):
     model = VideoStat

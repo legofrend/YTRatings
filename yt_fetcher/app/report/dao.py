@@ -9,8 +9,11 @@ from app.logger import logger, save_errors
 from app.report.models import Report
 from app.report.schemas import SMetaData, SReport
 from app.channel.schemas import SChannel, SChannelStat
+from app.channel.models import Category
+from app.channel.dao import CategoryDAO
 from app.video.schemas import SVideo, SVideoStat
 from app.period.period import Period
+from app.report.tools import render_info_pic
 
 
 def select_view(view_name: str, filters: dict = {}, conditions: list[str] = None):
@@ -114,12 +117,12 @@ class ReportDAO(BaseDAO):
             return None
         id = data["id"]
         data = data["data"]
+        # for item in data:
+        #     item.video = [SChannel(**i) for i in data]
         scale = data[0]["stat"]["score"] + max(0, -data[0]["stat"]["score_change"])
 
         category = CategoryDAO().find_by_id(category_id)
 
-        # locale.setlocale(locale.LC_ALL, "Russian")
-        # display_period = period._date.strftime("%B %Y")
         result = {
             "id": id,
             "period": period.strf(),
@@ -158,3 +161,13 @@ class ReportDAO(BaseDAO):
         ]
 
         return meta_data_list
+
+    @classmethod
+    def generate_info_images(
+        cls, period: Period, category_id: int, top_channels: int = 10
+    ):
+        report = cls.get(period, category_id)
+        data = report.data
+
+        for item in data[:top_channels]:
+            render_info_pic(report.period, report.category.name, item)
