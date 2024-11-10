@@ -6,14 +6,20 @@ from sqlalchemy import select, text
 from app.dao.base import BaseDAO
 from app.database import async_session_maker
 from app.logger import logger, save_errors
+from app.period import Period
+
 from app.report.models import Report
 from app.report.schemas import SMetaData, SReport
-from app.channel.schemas import SChannel, SChannelStat
-from app.channel.models import Category
-from app.channel.dao import CategoryDAO
-from app.video.schemas import SVideo, SVideoStat
-from app.period.period import Period
 from app.report.tools import render_info_pic
+
+from app.channel import (
+    SChannel,
+    SChannelStat,
+    Category,
+    CategoryDAO,
+    SVideo,
+    SVideoStat,
+)
 
 
 async def select_view(view_name: str, filters: dict = {}, conditions: list[str] = None):

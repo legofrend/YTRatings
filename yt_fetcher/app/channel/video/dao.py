@@ -1,16 +1,13 @@
-from datetime import date, datetime, timedelta
-
-# import locale
+from datetime import date, datetime
 from sqlalchemy import text
-
 
 from app.dao.base import BaseDAO
 from app.database import async_session_maker
 from app.logger import logger, save_errors
-from app.video.models import Video, VideoStat
 from app.period.period import Period
-
 import app.api.ytapi as yt
+
+from app.channel.video.models import Video, VideoStat
 
 
 class VideoDAO(BaseDAO):
@@ -90,7 +87,9 @@ class VideoDAO(BaseDAO):
 
     @classmethod
     async def search_new_by_channel_period(
-        cls, channel_ids: list[str] | str, period: Period | list[datetime] = Period()
+        cls,
+        channel_ids: list[str] | str,
+        period: Period | tuple[datetime, datetime] = Period(),
     ):
         if isinstance(channel_ids, str):
             channel_ids = [channel_ids]
@@ -98,7 +97,7 @@ class VideoDAO(BaseDAO):
         if isinstance(period, Period):
             period = period.as_range()
 
-        if isinstance(period, list) and len(period) != 2:
+        if isinstance(period, tuple) and len(period) != 2:
             raise Exception("Invalid period")
 
         data = []
@@ -126,25 +125,6 @@ class VideoDAO(BaseDAO):
                 )
 
         return data
-
-    @classmethod
-    async def search_new_by_category_period(
-        cls, category_ids: list[int] | int, period: Period | list[datetime] = Period()
-    ):
-        if isinstance(category_ids, int):
-            category_ids = [category_ids]
-        for category_id in category_ids:
-            # TODO finish method wo_videos
-            # channel_ids = ChannelDAO.get_ids_wo_video(
-            #     filters={"category_id": category_id, "report_period": period}
-            # )
-            channel_ids = await ChannelDAO.get_ids(filters={"category_id": category_id})
-            await cls.search_new_by_channel_period(channel_ids, period)
-            logger.info(
-                f"Updated {len(channel_ids)} channels for category {category_id}"
-            )
-
-        return True
 
     @classmethod
     async def get_thumbnails(

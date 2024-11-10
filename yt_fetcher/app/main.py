@@ -5,11 +5,9 @@ from datetime import date, datetime
 
 sys.path.append(os.getcwd())
 
-
-from app.period.period import Period
+from app.period import Period
 from app.report.dao import ReportDAO
-from app.video.dao import VideoDAO, VideoStatDAO
-from app.channel.dao import ChannelDAO, ChannelStatDAO
+from app.channel import ChannelDAO, ChannelStatDAO, VideoDAO, VideoStatDAO
 
 
 # Categories
@@ -37,14 +35,13 @@ async def actions():
     #     max_result=150,
     # )
 
-    # names = "@BoxOfficeRU @ruaiinfo".split(" ")
+    names = "@BoxOfficeRU @ruaiinfo".split(" ")
     # for name in names:
     #     await ChannelDAO.search_channel(name, category_id=category_id)
 
-    # print(names)
-    # await ChannelDAO.update_detail()
+    await ChannelDAO.update_detail()
 
-    await ChannelStatDAO.update_stat(report_period=period, category_id=category_id)
+    # await ChannelStatDAO.update_stat(report_period=period, category_id=category_id)
 
     # await VideoDAO.search_new_by_category_period(period=period, category_ids=category_id)
     # or

@@ -1,7 +1,8 @@
 from datetime import date, datetime
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 from typing import TYPE_CHECKING, List, Dict, Optional
-from app.channel.schemas import SChannel, SCategory
+from app.channel.schemas import SChannel
+from app.channel.category.schemas import SCategory
 
 if TYPE_CHECKING:
     # Убирает предупреждения отсутствия импорта и неприятные подчеркивания в PyCharm и VSCode

@@ -9,6 +9,7 @@ from app.dao.base import BaseDAO
 from app.database import async_session_maker
 from app.logger import logger, save_errors
 from app.channel.models import Channel, ChannelStat
+from app.channel.video.dao import VideoDAO
 from app.period.period import Period
 
 import app.api.ytapi as yt
@@ -144,6 +145,27 @@ class ChannelDAO(BaseDAO):
         logger.info(f"Find {len(unique_channel_ids)} unique channels")
 
         return await cls.update_detail(unique_channel_ids, skip_if_exist=True)
+
+    @classmethod
+    async def search_new_by_category_period(
+        cls,
+        category_ids: list[int] | int,
+        period: Period | tuple[datetime, datetime] = Period(),
+    ):
+        if isinstance(category_ids, int):
+            category_ids = [category_ids]
+        for category_id in category_ids:
+            # TODO finish method wo_videos
+            # channel_ids = ChannelDAO.get_ids_wo_video(
+            #     filters={"category_id": category_id, "report_period": period}
+            # )
+            channel_ids = await cls.get_ids(filters={"category_id": category_id})
+            await VideoDAO.search_new_by_channel_period(channel_ids, period)
+            logger.info(
+                f"Updated {len(channel_ids)} channels for category {category_id}"
+            )
+
+        return True
 
 
 class ChannelStatDAO(BaseDAO):
