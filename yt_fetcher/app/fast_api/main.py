@@ -3,6 +3,10 @@ import time
 from fastapi import FastAPI, applications
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi_cache import Cache
+from fastapi_cache.backends.inmemory import InMemoryCache
+from fastapi_cache.decorator import cache
+
 from starlette.requests import Request
 
 from app.logger import logger
@@ -49,14 +53,20 @@ app.add_middleware(
     ],
 )
 
+# Инициализация кэша
+cache = Cache(InMemoryCache())
+cache.init_app(app)
+
 
 # Эндпоинт для отдачи страницы index.html при заходе на домен
 @app.get("/ytr/report")
+@cache(expire=600)  # Кэшировать ответ на xxx секунд
 async def get_report(period: str, category_id: int):
     return await ReportDAO.get(period, category_id)
 
 
 @app.get("/ytr/metadata")
+@cache(expire=3600)  # Кэшировать ответ на xxx секунд
 async def get_report():
     return await ReportDAO.metadata()
 

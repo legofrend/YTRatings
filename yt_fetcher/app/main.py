@@ -20,7 +20,7 @@ from app.channel import ChannelDAO, ChannelStatDAO, VideoDAO, VideoStatDAO
 
 
 async def actions():
-    category_id = 6
+    category_id = 7
     period = Period(10)
     per_range = [date(2024, 8, 1), date(2024, 10, 31)]
 
@@ -35,11 +35,9 @@ async def actions():
     #     max_result=150,
     # )
 
-    names = "@BoxOfficeRU @ruaiinfo".split(" ")
-    # for name in names:
-    #     await ChannelDAO.search_channel(name, category_id=category_id)
-
-    await ChannelDAO.update_detail()
+    names = "@igorzuevich".split(" ")
+    ch_ids = await ChannelDAO.add_channels(names, category_id=category_id)
+    # await ChannelStatDAO.update_stat(report_period=period, channel_ids=ch_ids, category_id=category_id)
 
     # await ChannelStatDAO.update_stat(report_period=period, category_id=category_id)
 

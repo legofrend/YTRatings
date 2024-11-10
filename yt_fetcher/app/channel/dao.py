@@ -10,7 +10,7 @@ from app.database import async_session_maker
 from app.logger import logger, save_errors
 from app.channel.models import Channel, ChannelStat
 from app.channel.video.dao import VideoDAO
-from app.period.period import Period
+from app.period import Period
 
 import app.api.ytapi as yt
 
@@ -82,6 +82,7 @@ class ChannelDAO(BaseDAO):
             if category_id:
                 for item in data:
                     item["category_id"] = category_id
+                    item["status"] = 1
             await cls.add_update_bulk(data, skip_if_exist=True)
         return data
 
@@ -93,6 +94,17 @@ class ChannelDAO(BaseDAO):
         if not channel:
             return None
         return channel.get("channel_id")
+
+    @classmethod
+    async def add_channels(cls, names: list[str], category_id: int = None):
+        channel_ids = []
+        for name in names:
+            res = await cls.search_channel(name, category_id=category_id)
+            if res:
+                channel_ids.append(res[0].get("channel_id"))
+        if channel_ids:
+            await cls.update_detail(channel_ids=channel_ids)
+        return channel_ids
 
     @classmethod
     async def update_detail(
