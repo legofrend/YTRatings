@@ -49,54 +49,37 @@ class BaseDAO:
             return None
 
     @classmethod
-    async def update(cls, filter: dict, data: dict) -> list:
-        try:
-            query = (
-                update(cls.model)
-                .values(**data)
-                .filter_by(**filter)
-                .returning(cls.model.id)
-            )
-            async with async_session_maker() as session:
-                result = await session.execute(query)
-                await session.commit()
-                return result.mappings().all()
-                # return True
-
-        except (SQLAlchemyError, Exception) as e:
-            if isinstance(e, SQLAlchemyError):
-                msg = "Database Exc: Cannot update data into table"
-            elif isinstance(e, Exception):
-                msg = "Unknown Exc: Cannot update data into table"
-
-            logger.error(msg, extra={"table": cls.model.__tablename__}, exc_info=True)
-            return None
-
-    @classmethod
-    async def add_or_update(cls, data: dict, do_nothing: bool = False):
-        id = data.get(cls.gid, None)
-
-        stmt = insert(cls.model).values(**data)
-
-        if id:
-            if do_nothing:
-                stmt = stmt.on_conflict_do_nothing(index_elements=[cls.gid])
+    async def add_update_bulk_old(
+        cls, data, index: str = "", skip_if_exist: bool = False
+    ):
+        if not index:
+            index = str(cls.model.__tablename__) + "_id"
+        errors = []
+        stored = []
+        updated = []
+        # print(len(data))
+        for d in data:
+            obj = await cls.find_one_or_none(**{index: d[index]})
+            if not obj:
+                stored.append(d) if await cls.add(**d) else errors.append(d)
+            elif skip_if_exist:
+                continue
             else:
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=[cls.gid],
-                    set_={key: val for key, val in data.items() if key != cls.gid},
+                (
+                    updated.append(d)
+                    if await cls.update(obj.get("id"), **d)
+                    else errors.append(d)
                 )
-        stmt = stmt.returning(cls.model.id)
-        try:
 
-            async with async_session_maker() as session:
-                result = await session.execute(stmt)
-                await session.commit()
-                return result.mappings().first()
-        except Exception as e:
-            msg = "Add_or_update failed"
-            logger.error(msg, extra={"table": cls.model.__tablename__}, exc_info=True)
-            return None
+        msg = f"Added to {cls.model.__tablename__} {len(stored)} records, updated {len(updated)}"
+        if errors:
+            save_errors(errors, cls.model.__tablename__)
+            msg += f", {len(errors)} errors"
+            logger.error(msg)
+        else:
+            logger.info(msg)
+
+        return (stored, updated, errors)
 
     @classmethod
     async def add_update_bulk(cls, data, do_nothing: bool = False):
