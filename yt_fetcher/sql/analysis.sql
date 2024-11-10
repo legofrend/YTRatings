@@ -57,18 +57,20 @@ select
     cs.subscriber_count,
     cs.video_count,
     cs.channel_view_count,
+    cs.id,
     count(v.video_id) as videos,
     count(vs.id) as video_stats
 from channel as c
 left join channel_stat cs on c.channel_id = cs.channel_id
 left join video v on c.channel_id = v.channel_id
 left join video_stat vs on v.video_id = vs.video_id and vs.report_period = cs.report_period
-where c.category_id=7 and c.status = 1
-and c.id>=390
+where c.category_id>=0 and c.status = 1
+-- and c.id>=390
 --     and c.channel_id = 'UC8bw1lINePKw5dBhseYWrdQ'
-group by 1,2,3,4,5,6,7,8, 9
+group by 1,2,3,4,5,6,7,8, 9, 10
 -- order by cs.subscriber_count desc ;
-order by c.id desc ;
+order by c.id desc
+limit 10;
 
 -- report with category name
 select c.id, c.name, r.report_period

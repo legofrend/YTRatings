@@ -1,10 +1,10 @@
 from datetime import date
 
-from sqlalchemy import delete, insert, select, text, update
+from sqlalchemy import select, text
 
 
 from app.dao import BaseDAO
-from app.database import session_maker, engine
+from app.database import async_session_maker
 from app.logger import logger, save_errors
 from app.report.models import Report
 from app.report.schemas import SMetaData, SReport
@@ -16,7 +16,7 @@ from app.period.period import Period
 from app.report.tools import render_info_pic
 
 
-def select_view(view_name: str, filters: dict = {}, conditions: list[str] = None):
+async def select_view(view_name: str, filters: dict = {}, conditions: list[str] = None):
     if not conditions:
         conditions = []
     query = f"select * from {view_name}"
@@ -25,9 +25,9 @@ def select_view(view_name: str, filters: dict = {}, conditions: list[str] = None
     if conditions:
         query += " where " + " and ".join(conditions)
 
-    with session_maker() as session:
+    async with async_session_maker() as session:
         query = text(query)
-        result = session.execute(query)
+        result = await session.execute(query)
         data = result.mappings().all()
         data = [dict(item) for item in data]
         return data
@@ -37,22 +37,22 @@ class ReportDAO(BaseDAO):
     model = Report
 
     @classmethod
-    def add_update(cls, val: dict, skip_if_exist: bool = False):
-        obj = cls.find_one_or_none(
+    async def add_update(cls, val: dict, skip_if_exist: bool = False):
+        obj = await cls.find_one_or_none(
             category_id=val["category_id"], report_period=val["report_period"]
         )
         if not obj:
-            return cls.add(**val)
+            return await cls.add(**val)
         elif skip_if_exist:
             return None
         else:
-            return cls.update(obj.get("id"), **val)
+            return await cls.update(obj.get("id"), **val)
 
     @classmethod
-    def _query_top_videos(
+    async def _query_top_videos(
         cls, period: Period, category_id: int, top_number: int = 3
     ) -> list[SVideo]:
-        data = select_view(
+        data = await select_view(
             "channel_period_top_videos",
             filters={"report_period": period.strf(), "category_id": category_id},
             conditions=["rank <= " + str(top_number)],
@@ -68,13 +68,13 @@ class ReportDAO(BaseDAO):
         return result
 
     @classmethod
-    def query_report_view(cls, period: Period, category_id: int) -> dict:
-        data = select_view(
+    async def query_report_view(cls, period: Period, category_id: int) -> dict:
+        data = await select_view(
             "report_view",
             filters={"report_period": period.strf(), "category_id": category_id},
         )
 
-        top_videos = cls._query_top_videos(period, category_id, top_number=5)
+        top_videos = await cls._query_top_videos(period, category_id, top_number=5)
         channels = []
         for i in data:
             stat = SChannelStat.model_validate(i)
@@ -85,12 +85,12 @@ class ReportDAO(BaseDAO):
         return channels
 
     @classmethod
-    def build(cls, period: Period, category_id: int):
-        data = cls.query_report_view(period, category_id)
+    async def build(cls, period: Period, category_id: int):
+        data = await cls.query_report_view(period, category_id)
         if not data:
             return None
         # TODO replace with add_update
-        res = cls.add_update(
+        res = await cls.add_update(
             val={
                 "report_period": period.strf(),
                 "category_id": category_id,
@@ -106,11 +106,11 @@ class ReportDAO(BaseDAO):
         return res
 
     @classmethod
-    def get(cls, period: Period | date | str, category_id: int) -> SReport:
+    async def get(cls, period: Period | date | str, category_id: int) -> SReport:
         if isinstance(period, (str, date)):
             period = Period.parse(period)
 
-        data = cls.find_one_or_none(
+        data = await cls.find_one_or_none(
             report_period=period.strf(), category_id=category_id
         )
         if not data:
@@ -121,7 +121,7 @@ class ReportDAO(BaseDAO):
         #     item.video = [SChannel(**i) for i in data]
         scale = data[0]["stat"]["score"] + max(0, -data[0]["stat"]["score_change"])
 
-        category = CategoryDAO().find_by_id(category_id)
+        category = await CategoryDAO().find_by_id(category_id)
 
         result = {
             "id": id,
@@ -136,14 +136,14 @@ class ReportDAO(BaseDAO):
         return SReport(**result)
 
     @classmethod
-    def metadata(cls) -> list[SMetaData]:
-        with session_maker() as session:
+    async def metadata(cls) -> list[SMetaData]:
+        async with async_session_maker() as session:
             query = (
                 select(Category.id, Category.name, Report.report_period)
                 .join(Category, Category.id == Report.category_id, isouter=True)
                 .order_by(Category.id, Report.report_period.asc())
             )
-            results = session.execute(query)
+            results = await session.execute(query)
             # results = result.mappings().all()
 
         data_dict = {}
@@ -163,10 +163,10 @@ class ReportDAO(BaseDAO):
         return meta_data_list
 
     @classmethod
-    def generate_info_images(
+    async def generate_info_images(
         cls, period: Period, category_id: int, top_channels: int = 10
     ):
-        report = cls.get(period, category_id)
+        report = await cls.get(period, category_id)
         data = report.data
 
         for item in data[:top_channels]:

@@ -1,11 +1,11 @@
 from datetime import date, datetime, timedelta
 
 # import locale
-from sqlalchemy import delete, insert, select, text, update
+from sqlalchemy import text
 
 
 from app.dao import BaseDAO
-from app.database import session_maker, engine
+from app.database import async_session_maker
 from app.logger import logger, save_errors
 from app.video.models import Video, VideoStat
 from app.period.period import Period
@@ -17,13 +17,13 @@ class VideoDAO(BaseDAO):
     model = Video
 
     @classmethod
-    def get_ids(cls, filters: dict = {}):
-        data = cls.find_all(**filters)
+    async def get_ids(cls, filters: dict = {}):
+        data = await cls.find_all(**filters)
         ids = [d.video_id for d in data]
         return ids
 
     @classmethod
-    def get_ids_wo_stat(
+    async def get_ids_wo_stat(
         cls,
         report_period: Period,
         published_at_period: Period = None,
@@ -32,7 +32,7 @@ class VideoDAO(BaseDAO):
         if not published_at_period:
             published_at_period = report_period.next(-1)
 
-        with session_maker() as session:
+        async with async_session_maker() as session:
             query = f"""select distinct v.video_id
                         from video as v
                         left join channel as c on c.channel_id = v.channel_id
@@ -41,17 +41,17 @@ class VideoDAO(BaseDAO):
                         ;
                     """
             query = text(query)
-            result = session.execute(query)
+            result = await session.execute(query)
             data = result.mappings().all()
             data = [item["video_id"] for item in data]
             return data
 
     @classmethod
-    def update_detail(
+    async def update_detail(
         cls, video_ids: list[str] | str = None, skip_if_exist: bool = False
     ):
         if not video_ids:
-            video_ids = cls.get_ids(
+            video_ids = await cls.get_ids(
                 filters={
                     "duration": None,
                 }
@@ -64,7 +64,7 @@ class VideoDAO(BaseDAO):
         data_shorts = {item["video_id"]: item["is_short"] for item in data_shorts}
         for item in data:
             is_short = data_shorts.get(item["video_id"])
-            if item.get("is_short") is None and is_short:
+            if item.get("is_short") is None and is_short is not None:
                 item["is_short"] = is_short
                 item["video_url"] = (
                     "https://www.youtube.com/"
@@ -72,24 +72,24 @@ class VideoDAO(BaseDAO):
                     + item["video_id"]
                 )
 
-        cls.add_update_bulk(data, skip_if_exist=skip_if_exist)
+        await cls.add_update_bulk(data, skip_if_exist=skip_if_exist)
         return data
 
     @classmethod
-    def update_is_short(
+    async def update_is_short(
         cls, video_ids: list[str] | str = None, skip_if_exist: bool = False
     ):
         if not video_ids:
-            res = cls.find_all(is_short=None)
+            res = await cls.find_all(is_short=None)
             video_ids = [item["video_id"] for item in res]
 
         data = yt.check_shorts(video_ids)
         if data:
-            cls.add_update_bulk(data, skip_if_exist=skip_if_exist)
+            await cls.add_update_bulk(data, skip_if_exist=skip_if_exist)
         return data
 
     @classmethod
-    def search_new_by_channel_period(
+    async def search_new_by_channel_period(
         cls, channel_ids: list[str] | str, period: Period | list[datetime] = Period()
     ):
         if isinstance(channel_ids, str):
@@ -116,7 +116,7 @@ class VideoDAO(BaseDAO):
                     max_result=1000,
                 )
                 if videos:
-                    cls.add_update_bulk(videos, skip_if_exist=True)
+                    await cls.add_update_bulk(videos, skip_if_exist=True)
                     data.extend(videos)
 
             except Exception as e:
@@ -128,7 +128,7 @@ class VideoDAO(BaseDAO):
         return data
 
     @classmethod
-    def search_new_by_category_period(
+    async def search_new_by_category_period(
         cls, category_ids: list[int] | int, period: Period | list[datetime] = Period()
     ):
         if isinstance(category_ids, int):
@@ -138,8 +138,8 @@ class VideoDAO(BaseDAO):
             # channel_ids = ChannelDAO.get_ids_wo_video(
             #     filters={"category_id": category_id, "report_period": period}
             # )
-            channel_ids = ChannelDAO.get_ids(filters={"category_id": category_id})
-            cls.search_new_by_channel_period(channel_ids, period)
+            channel_ids = await ChannelDAO.get_ids(filters={"category_id": category_id})
+            await cls.search_new_by_channel_period(channel_ids, period)
             logger.info(
                 f"Updated {len(channel_ids)} channels for category {category_id}"
             )
@@ -147,7 +147,7 @@ class VideoDAO(BaseDAO):
         return True
 
     @classmethod
-    def get_thumbnails(
+    async def get_thumbnails(
         cls, channel_ids: list[str] = None, category_id: int = None
     ) -> None:
         from app.report.tools import download_file
@@ -157,7 +157,7 @@ class VideoDAO(BaseDAO):
         workdir = r"..\video_gen\channel_logo" + os.sep + str(category_id)
         os.makedirs(workdir, exist_ok=True)
         # if not channel_ids:
-        channels = cls.find_all(category_id=category_id, status=1)
+        channels = await cls.find_all(category_id=category_id, status=1)
 
         for channel in channels:
             file_url = channel["thumbnail_url"]
@@ -167,7 +167,7 @@ class VideoDAO(BaseDAO):
                 download_file(file_url, full_path)
 
     @classmethod
-    def update_clickbait(cls, data: list[dict]):
+    async def update_clickbait(cls, data: list[dict]):
         # TODO rewrite this method
         # is_click_bait = [
         #     {
@@ -179,7 +179,7 @@ class VideoDAO(BaseDAO):
         for item in data:
             try:
                 id = item.pop("video_id")
-                VideoDAO.update(id, "video_id", **item)
+                await VideoDAO.update(id, "video_id", **item)
             except Exception as e:
                 logger.error(e)
 
@@ -188,14 +188,14 @@ class VideoStatDAO(BaseDAO):
     model = VideoStat
 
     @classmethod
-    def update_stat(
+    async def update_stat(
         cls,
         report_period: Period,
         video_ids: list[str] | str = None,
         category_id: int = None,
     ):
         if not video_ids:
-            video_ids = VideoDAO.get_ids_wo_stat(
+            video_ids = await VideoDAO.get_ids_wo_stat(
                 report_period=report_period, category_id=category_id
             )
 
@@ -204,5 +204,8 @@ class VideoStatDAO(BaseDAO):
         if data:
             for item in data:
                 item["report_period"] = report_period.strf()
-            cls.add_bulk(data)
+            await cls.add_bulk(data)
         return data
+
+
+# print("OK")

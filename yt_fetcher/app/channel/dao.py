@@ -1,33 +1,36 @@
 from datetime import date, datetime, timedelta
 
-# import locale
-from sqlalchemy import delete, insert, select, text, update
-from sqlalchemy.exc import SQLAlchemyError
+
+from sqlalchemy import text
+
+# from sqlalchemy.exc import SQLAlchemyError
 
 from app.dao import BaseDAO
-from app.database import session_maker, engine
+from app.database import async_session_maker
 from app.logger import logger, save_errors
 from app.channel.models import Channel, ChannelStat, Category
 from app.period.period import Period
 
 import app.ytapi as yt
 
+
 class CategoryDAO(BaseDAO):
     model = Category
+
 
 class ChannelDAO(BaseDAO):
     model = Channel
 
     @classmethod
-    def get_ids(cls, filters: dict = {}):
+    async def get_ids(cls, filters: dict = {}):
         # if not "status" in filters.keys():
         #     filters["status"] = 1
-        data = cls.find_all(**filters)
+        data = await cls.find_all(**filters)
         ids = [d.channel_id for d in data]
         return ids
 
     @classmethod
-    def get_ids_wo_stat(
+    async def get_ids_wo_stat(
         cls,
         report_period: Period,
         category_id: int = None,
@@ -41,14 +44,14 @@ class ChannelDAO(BaseDAO):
         if category_id:
             query += f" and c.category_id={category_id}"
         query = text(query)
-        with session_maker() as session:
-            result = session.execute(query)
+        async with async_session_maker() as session:
+            result = await session.execute(query)
             data = result.mappings().all()
             data = [item["channel_id"] for item in data]
             return data
 
     @classmethod
-    def get_ids_wo_video(
+    async def get_ids_wo_video(
         cls,
         report_period: Period,
         category_id: int = None,
@@ -61,14 +64,14 @@ class ChannelDAO(BaseDAO):
         query += f" and c.category_id={category_id}" if category_id else ""
         query += " group by c.channel_id having count(*) = 0"
         query = text(query)
-        with session_maker() as session:
-            result = session.execute(query)
+        async with async_session_maker() as session:
+            result = await session.execute(query)
             data = result.mappings().all()
             data = [item["channel_id"] for item in data]
             return data
 
     @classmethod
-    def search_channel(
+    async def search_channel(
         cls,
         query: str,
         max_result: int = 1,
@@ -82,35 +85,35 @@ class ChannelDAO(BaseDAO):
             if category_id:
                 for item in data:
                     item["category_id"] = category_id
-            cls.add_update_bulk(data, skip_if_exist=True)
+            await cls.add_update_bulk(data, skip_if_exist=True)
         return data
 
     @classmethod
-    def find_by_title(cls, title: str) -> str:
+    async def find_by_title(cls, title: str) -> str:
         channel = cls.find_one_or_none(channel_title=title)
         if not channel:
-            [channel] = cls.search_channel(title)
+            [channel] = await cls.search_channel(title)
         if not channel:
             return None
         return channel.get("channel_id")
 
     @classmethod
-    def update_detail(
+    async def update_detail(
         cls, channel_ids: list[str] | str = None, skip_if_exist: bool = False
     ):
         if not channel_ids:
-            channel_ids = cls.get_ids(
+            channel_ids = await cls.get_ids(
                 filters={
                     "published_at": None,
                 }
             )
         data = yt.channel_list(channel_ids, obj_type="detail")
         if data:
-            cls.add_update_bulk(data, skip_if_exist=skip_if_exist)
+            await cls.add_update_bulk(data, skip_if_exist=skip_if_exist)
         return data
 
     @classmethod
-    def search_by_keywords(
+    async def search_by_keywords(
         cls,
         query: str,
         date_from: datetime = datetime.now(),
@@ -144,21 +147,21 @@ class ChannelDAO(BaseDAO):
         unique_channel_ids = list(set(video["channel_id"] for video in data))
         logger.info(f"Find {len(unique_channel_ids)} unique channels")
 
-        return cls.update_detail(unique_channel_ids, skip_if_exist=True)
+        return await cls.update_detail(unique_channel_ids, skip_if_exist=True)
 
 
 class ChannelStatDAO(BaseDAO):
     model = ChannelStat
 
     @classmethod
-    def update_stat(
+    async def update_stat(
         cls,
         report_period: Period,
         channel_ids: list[str] | str = None,
         category_id: int = None,
     ):
         if not channel_ids:
-            channel_ids = ChannelDAO.get_ids_wo_stat(
+            channel_ids = await ChannelDAO.get_ids_wo_stat(
                 report_period=report_period, category_id=category_id
             )
 
@@ -166,6 +169,6 @@ class ChannelStatDAO(BaseDAO):
 
         if data:
             for item in data:
-                item["report_period"] = report_period.strf()
-            cls.add_bulk(data)
+                item["report_period"] = report_period._date
+            await cls.add_bulk(data)
         return data

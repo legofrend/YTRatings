@@ -51,14 +51,14 @@ app.add_middleware(
 
 
 # Эндпоинт для отдачи страницы index.html при заходе на домен
-@app.get("/ytr/report/")
+@app.get("/ytr/report")
 async def get_report(period: str, category_id: int):
-    return ReportDAO.get(period, category_id)
+    return await ReportDAO.get(period, category_id)
 
 
-@app.get("/ytr/metadata/")
+@app.get("/ytr/metadata")
 async def get_report():
-    return ReportDAO.metadata()
+    return await ReportDAO.metadata()
 
 
 @app.middleware("http")
