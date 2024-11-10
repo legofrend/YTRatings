@@ -12,6 +12,7 @@ from app.channel.video.models import Video, VideoStat
 
 class VideoDAO(BaseDAO):
     model = Video
+    gid = "video_id"
 
     @classmethod
     async def get_ids(cls, filters: dict = {}):

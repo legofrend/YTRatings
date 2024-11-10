@@ -17,6 +17,7 @@ import app.api.ytapi as yt
 
 class ChannelDAO(BaseDAO):
     model = Channel
+    gid = "channel_id"
 
     @classmethod
     async def get_ids(cls, filters: dict = {}):
