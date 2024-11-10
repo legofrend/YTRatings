@@ -76,29 +76,27 @@ class BaseDAO:
     async def add_or_update(cls, data: dict, do_nothing: bool = False):
         id = data.get(cls.gid, None)
 
-        if not id:
-            raise ValueError(cls.gid + " is required")
-
         stmt = insert(cls.model).values(**data)
 
-        if do_nothing:
-            stmt = stmt.on_conflict_do_nothing(
-                index_elements=[cls.gid]
-                # constraint=cls.model.__table__.c[cls.gid].name,  # Указываем уникальное поле
-            )
-        else:
-            stmt = stmt.on_conflict_do_update(
-                index_elements=[cls.gid],
-                # constraint=cls.model.__table__.c[cls.gid].name,  # Указываем уникальное поле
-                set_={key: val for key, val in data.items() if key != cls.gid},
-            )
+        if id:
+            if do_nothing:
+                stmt = stmt.on_conflict_do_nothing(index_elements=[cls.gid])
+            else:
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=[cls.gid],
+                    set_={key: val for key, val in data.items() if key != cls.gid},
+                )
         stmt = stmt.returning(cls.model.id)
 
-        async with async_session_maker() as session:
-            result = await session.execute(stmt)
-            await session.commit()
-
-        return result.mappings().first()
+        try:
+            async with async_session_maker() as session:
+                result = await session.execute(stmt)
+                await session.commit()
+            return result.mappings().first()
+        except Exception as e:
+            msg = "Add_or_update failed"
+            logger.error(msg, extra={"table": cls.model.__tablename__}, exc_info=True)
+            return None
 
     @classmethod
     async def add_update_bulk(cls, data, do_nothing: bool = False):
