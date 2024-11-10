@@ -1,1 +1,1 @@
-from period.period import Period
+from app.period.period import Period

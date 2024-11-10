@@ -7,7 +7,7 @@ TRUNCATE TABLE report RESTART IDENTITY;
 
 -- reset id key
 SELECT pg_get_serial_sequence('video_stat', 'id');
-SELECT setval('report_id_seq', (SELECT MAX(id) FROM report) + 1);
+SELECT setval('category_id_seq', (SELECT MAX(id) FROM category) + 1);
 
 -- set published period for videos
 update video set published_at_period = date_trunc('month', published_at)::date where published_at_period is null;

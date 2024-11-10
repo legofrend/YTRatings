@@ -1,6 +1,7 @@
 from datetime import date
 
 from sqlalchemy import select, text
+from sqlalchemy.dialects.postgresql import insert
 
 
 from app.dao.base import BaseDAO
@@ -43,16 +44,24 @@ class ReportDAO(BaseDAO):
     model = Report
 
     @classmethod
-    async def add_update(cls, val: dict, skip_if_exist: bool = False):
-        obj = await cls.find_one_or_none(
-            category_id=val["category_id"], report_period=val["report_period"]
-        )
-        if not obj:
-            return await cls.add(**val)
-        elif skip_if_exist:
-            return None
+    # new version of add_update using on conflict
+    async def add_or_update(cls, data: dict, do_nothing: bool = False):
+        stmt = insert(cls.model).values(**data)
+
+        if do_nothing:
+            stmt = stmt.on_conflict_do_nothing(constraint="uq_period_category")
         else:
-            return await cls.update(obj.get("id"), **val)
+            stmt = stmt.on_conflict_do_update(
+                constraint="uq_period_category",
+                set_={"data": data["data"]},
+            )
+        stmt = stmt.returning(cls.model.id)
+
+        async with async_session_maker() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+
+        return result.mappings().first()
 
     @classmethod
     async def _query_top_videos(
@@ -95,8 +104,8 @@ class ReportDAO(BaseDAO):
         data = await cls.query_report_view(period, category_id)
         if not data:
             return None
-        # TODO replace with add_update
-        res = await cls.add_update(
+
+        res = await cls.add_or_update(
             val={
                 "report_period": period.strf(),
                 "category_id": category_id,

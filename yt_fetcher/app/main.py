@@ -21,11 +21,19 @@ from app.channel import ChannelDAO, ChannelStatDAO, VideoDAO, VideoStatDAO
 
 async def actions():
     category_id = 7
-    period = Period(10)
+    period = Period(11)
     per_range = [date(2024, 8, 1), date(2024, 10, 31)]
 
     start_dt = datetime.now()
     print("Start", start_dt)
+
+    # async with async_session_maker() as session:
+    #     print(type(data))
+    #     query = insert(Category).values(data)  # .returning(cls.model.id)
+    #     result = await session.execute(query)
+    #     await session.commit()
+    #     # return result.mappings().first()
+    #     return True
 
     # await ChannelDAO.search_by_keywords(
     #     "нейросети",
@@ -35,8 +43,8 @@ async def actions():
     #     max_result=150,
     # )
 
-    names = "@igorzuevich".split(" ")
-    ch_ids = await ChannelDAO.add_channels(names, category_id=category_id)
+    names = "".split(" ")
+    # ch_ids = await ChannelDAO.add_channels(names, category_id=category_id)
     # await ChannelStatDAO.update_stat(report_period=period, channel_ids=ch_ids, category_id=category_id)
 
     # await ChannelStatDAO.update_stat(report_period=period, category_id=category_id)
