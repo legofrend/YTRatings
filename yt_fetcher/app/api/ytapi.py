@@ -48,7 +48,7 @@ def parse_yt_time(s):
 def search_list(
     query: str,
     max_result: int = 50,
-    published: list[datetime] | datetime = [],
+    published: tuple[datetime, datetime] = None,
     order: OrderType = "",
     type: ResourseType = "video",
     channel_id: str = None,
@@ -62,15 +62,11 @@ def search_list(
         "maxResults": min(max_result, 50),
     }
     if published:
-        if isinstance(published, list):
-            published_after, published_before = (dt2ytfmt(d) for d in published)
-        else:
-            published_after = dt2ytfmt(published)
-
-        if published_after:
-            params["publishedAfter"] = published_after
-        if published_before:
-            params["publishedBefore"] = published_before
+        after, before = published
+        if after:
+            params["publishedAfter"] = dt2ytfmt(after)
+        if before:
+            params["publishedBefore"] = dt2ytfmt(before)
 
     if order:
         params["order"] = order

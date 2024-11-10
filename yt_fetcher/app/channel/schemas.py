@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict, Field
 from typing import TYPE_CHECKING, List, Dict, Optional
-from app.video.schemas import SVideo
+from app.channel.video.schemas import SVideo
 
 # Убирает предупреждения отсутствия импорта и неприятные подчеркивания в PyCharm и VSCode
 # if TYPE_CHECKING:
@@ -36,13 +36,6 @@ class SChannel(BaseModel):
     top_videos: List[SVideo]
 
     model_config = ConfigDict(from_attributes=True)
-
-
-class SCategory(BaseModel):
-    id: int
-    name: str
-    title: str
-    description: Optional[str] = ""
 
 
 # print("ok")

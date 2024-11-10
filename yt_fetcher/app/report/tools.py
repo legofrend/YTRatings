@@ -129,6 +129,41 @@ def render_info_pic(period: date, category_name: str, channel: SChannel):
     return True
 
 
+def text_value(value):
+    if value == 0:
+        return "без изменений"
+    if abs(value) >= 10**6:
+        return str(round(abs(value) / 10**6, 1)) + " миллионов"
+    if abs(value) >= 10**3:
+        return str(round(abs(value) / 10**3)) + " тысяч"
+    return str(abs(value))
+
+
+def gen_script(data: list[SChannel]):
+    tmpl_file = "../video_gen/templates/script_tmpl_ai_first.txt"
+    output_file = "../video_gen/2024-10/Нейросети/script.txt"
+    with open(tmpl_file, "r", encoding="utf-8") as f:
+        tmlp = f.read()
+
+    rdata = []
+    for item in data:
+        val = {
+            "score_display": text_value(item.stat.score),
+            "score_change_display": text_value(item.stat.score_change),
+            "score_video_display": text_value(item.top_videos[0].stat.score),
+            "channel_title": item.channel_title,
+            "video_title": item.top_videos[0].title,
+            "rank_change": item.rank_change,
+        }
+
+        rdata.append(val)
+
+    # print(rdata[0])
+    res = tmlp.format(data=rdata)
+    with open(output_file, "w", encoding="utf-8") as f:
+        f.write(res)
+
+
 # def get_thumbnails(channel_ids: list[str] = None, category_id: int = None) -> None:
 
 #     # workdir = r'C:\Users\eremi\Documents\4. Projects\2024-07 YTRatings\video_gen\channel_logo'

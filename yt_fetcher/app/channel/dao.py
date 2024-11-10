@@ -5,17 +5,13 @@ from sqlalchemy import text
 
 # from sqlalchemy.exc import SQLAlchemyError
 
-from app.dao import BaseDAO
+from app.dao.base import BaseDAO
 from app.database import async_session_maker
 from app.logger import logger, save_errors
-from app.channel.models import Channel, ChannelStat, Category
+from app.channel.models import Channel, ChannelStat
 from app.period.period import Period
 
-import app.ytapi as yt
-
-
-class CategoryDAO(BaseDAO):
-    model = Category
+import app.api.ytapi as yt
 
 
 class ChannelDAO(BaseDAO):

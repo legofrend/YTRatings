@@ -23,7 +23,7 @@ services:
       - .env-docker
     depends_on: # Запускаем только после запуска БД и Redis (depends on = зависит от)
       - db
-    command: sh -c "uvicorn app.fastapi_app:app --port 5000 --host 0.0.0.0 --proxy-headers"
+    command: sh -c "uvicorn app.fast_api.main:app --port 5000 --host 0.0.0.0 --proxy-headers"
     ports:
       - 5001:5000
     networks:

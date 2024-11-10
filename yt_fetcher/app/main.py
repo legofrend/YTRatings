@@ -37,7 +37,7 @@ async def actions():
     #     max_result=150,
     # )
 
-    # names = "@BoxOfficeRU".split(" ")
+    # names = "@BoxOfficeRU @ruaiinfo".split(" ")
     # for name in names:
     #     await ChannelDAO.search_channel(name, category_id=category_id)
 

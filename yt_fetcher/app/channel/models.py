@@ -5,7 +5,6 @@ from sqlalchemy import (
     Date,
     func,
     ForeignKey,
-    
 )
 from sqlalchemy.dialects.postgresql import JSONB
 
@@ -16,14 +15,6 @@ from app.database import Base
 
 # if TYPE_CHECKING:
 # Убирает предупреждения отсутствия импорта и неприятные подчеркивания в PyCharm и VSCode
-
-
-class Category(Base):
-    __tablename__ = "category"
-    active: Mapped[bool] = mapped_column(default=True)
-    name: Mapped[str | None]
-    title: Mapped[str | None]
-    description: Mapped[str | None]
 
 
 class Channel(Base):
@@ -48,5 +39,3 @@ class ChannelStat(Base):
     channel_view_count: Mapped[Optional[int]] = mapped_column(BigInteger)
     subscriber_count: Mapped[Optional[int]] = mapped_column(BigInteger)
     video_count: Mapped[Optional[int]]
-
-

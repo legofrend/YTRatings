@@ -85,7 +85,7 @@ if __name__ == "__main__":
         os.path.join(os.path.dirname(os.path.realpath(__file__)), os.pardir)
     )
     uvicorn.run(
-        app="app.fastapi_app:app",
+        app="app.fast_api.main:app",
         port=5000,
         reload=True,
     )

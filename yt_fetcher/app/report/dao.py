@@ -3,7 +3,7 @@ from datetime import date
 from sqlalchemy import select, text
 
 
-from app.dao import BaseDAO
+from app.dao.base import BaseDAO
 from app.database import async_session_maker
 from app.logger import logger, save_errors
 from app.report.models import Report

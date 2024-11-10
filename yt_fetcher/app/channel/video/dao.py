@@ -4,13 +4,13 @@ from datetime import date, datetime, timedelta
 from sqlalchemy import text
 
 
-from app.dao import BaseDAO
+from app.dao.base import BaseDAO
 from app.database import async_session_maker
 from app.logger import logger, save_errors
 from app.video.models import Video, VideoStat
 from app.period.period import Period
 
-import app.ytapi as yt
+import app.api.ytapi as yt
 
 
 class VideoDAO(BaseDAO):
