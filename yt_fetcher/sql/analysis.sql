@@ -1,6 +1,7 @@
 -- Altering and update tables
 alter table video drop column is_short;
 alter table category add active boolean default True not null;
+alter table channel  add last_video_fetch_dt timestamp default Null;
 
 -- ! remove all data in the table
 TRUNCATE TABLE report RESTART IDENTITY;
@@ -36,14 +37,19 @@ WHERE channel_id IN (
 );
 
 update channel set status = null where category_id=7
+
+update channel set last_video_fetch_dt = '2024-11-01'::date where last_video_fetch_dt is null and status > 0;
+
 -------------------------------------------------------------
+
+update video set is_short = True where duration<60 and is_short is FALSE and id>25000
 
 select * from channel_period_top_videos limit 3;
 
-select * from report where category_id = 5 and report_period='2024-10-01';
+select * from report where category_id = 6 and report_period='2024-10-01';
 
 select * from report_view where category_id = 5 and report_period='2024-10-01'
-and channel_id = 'UCFkngbKHD8Qd9XxGrgpF59Q'
+-- and channel_id = 'UCFkngbKHD8Qd9XxGrgpF59Q'
 
 
 -- info about channel merged with stat and info about videos in the period
@@ -147,9 +153,7 @@ order by v.published_at
 select c.id, c.channel_id, c.channel_title
 from channel as c
 left join video v on v.channel_id = c.channel_id and v.published_at_period = '2024-10-01'
-where c.status=1 and c.category_id=7 and v.video_id is null
+where c.status=1 and c.category_id >= 5 and v.video_id is null
 --     and c.channel_id='UCFkngbKHD8Qd9XxGrgpF59Q'
 order by 1
-
-
 

@@ -26,10 +26,6 @@ def save_json(data_json, filename: str = "out_json.txt"):
         json.dump(data_json, json_file, indent=2, default=str, ensure_ascii=False)
 
 
-def save_df(df_data, filename: str = "out.csv"):
-    df_data.to_csv(filename, index=False, sep="\t", decimal=",")
-
-
 def save_json_csv(data_json, filename: str):
     # Сохраняем данные в CSV файл с табуляцией в качестве разделителя
     fieldnames = data_json[0].keys()

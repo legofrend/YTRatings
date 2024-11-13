@@ -122,12 +122,10 @@ class ReportDAO(BaseDAO):
 
     @classmethod
     async def get(cls, period: Period | date | str, category_id: int) -> SReport:
-        if isinstance(period, (str, date)):
+        if isinstance(period, (str)):
             period = Period.parse(period)
 
-        data = await cls.find_one_or_none(
-            report_period=period.strf(), category_id=category_id
-        )
+        data = await cls.find_one_or_none(report_period=period, category_id=category_id)
         if not data:
             return None
         id = data["id"]
@@ -179,10 +177,14 @@ class ReportDAO(BaseDAO):
 
     @classmethod
     async def generate_info_images(
-        cls, period: Period, category_id: int, top_channels: int = 10
+        cls,
+        period: Period,
+        category_id: int,
+        top_channels: int = 10,
+        top_videos_count: int = 1,
     ):
         report = await cls.get(period, category_id)
         data = report.data
 
         for item in data[:top_channels]:
-            render_info_pic(report.period, report.category.name, item)
+            render_info_pic(report.period, report.category.name, item, top_videos_count)

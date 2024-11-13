@@ -80,7 +80,9 @@ def draw_value(
     draw.text(xy, text, fill=color, font=font)
 
 
-def render_info_pic(period: date, category_name: str, channel: SChannel):
+def render_info_pic(
+    period: date, category_name: str, channel: SChannel, top_videos_count: int = 1
+):
 
     # Prepare variables
     parent_dir = r"..\video_gen\\"
@@ -100,10 +102,11 @@ def render_info_pic(period: date, category_name: str, channel: SChannel):
             return False
 
     # download thumbnails for top videos
-    for index, video in enumerate(channel.top_videos[:3], start=1):
-        video_file = os.path.join(output_dir, f"{channel.rank}_{index}.jpg")
-        if not os.path.exists(video_file):
-            download_file(video.thumbnail_url, video_file)
+    if top_videos_count > 0:
+        for index, video in enumerate(channel.top_videos[:top_videos_count], start=1):
+            video_file = os.path.join(output_dir, f"{channel.rank}_{index}.jpg")
+            if not os.path.exists(video_file):
+                download_file(video.thumbnail_url, video_file)
 
     # Load template
     image = Image.open(tmpl_path)
@@ -139,9 +142,7 @@ def text_value(value):
     return str(abs(value))
 
 
-def gen_script(data: list[SChannel]):
-    tmpl_file = "../video_gen/templates/script_tmpl_ai_first.txt"
-    output_file = "../video_gen/2024-10/Нейросети/script.txt"
+def gen_script(data: list[SChannel], tmpl_file: str, output_file: str):
     with open(tmpl_file, "r", encoding="utf-8") as f:
         tmlp = f.read()
 

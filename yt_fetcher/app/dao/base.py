@@ -140,6 +140,7 @@ class BaseDAO:
     @classmethod
     async def update_bulk(cls, data: list[dict], identifier: str = None) -> list:
         identifier = identifier or cls.gid
+        # TODO rewrite without cycle to speed up, it was not easy when id is not in data
         try:
             async with async_session_maker() as session:
                 for record in data:
@@ -153,7 +154,7 @@ class BaseDAO:
                             .returning(cls.model.id)
                         )
                         await session.execute(query)
-                        result = await session.execute(query)
+                        # result = await session.execute(query)
                 await session.commit()
                 # return result.mappings().all()
                 return True

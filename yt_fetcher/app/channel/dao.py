@@ -84,14 +84,14 @@ class ChannelDAO(BaseDAO):
                 for item in data:
                     item["category_id"] = category_id
                     item["status"] = 1
-            await cls.add_update_bulk(data, skip_if_exist=True)
+            await cls.add_update_bulk(data, do_nothing=True)
         return data
 
     @classmethod
-    async def find_by_title(cls, title: str) -> str:
-        channel = cls.find_one_or_none(channel_title=title)
+    async def find_by_name(cls, name: str) -> str:
+        channel = cls.find_one_or_none(custom_url=name)
         if not channel:
-            [channel] = await cls.search_channel(title)
+            [channel] = await cls.search_channel(name)
         if not channel:
             return None
         return channel.get("channel_id")
@@ -109,7 +109,7 @@ class ChannelDAO(BaseDAO):
 
     @classmethod
     async def update_detail(
-        cls, channel_ids: list[str] | str = None, skip_if_exist: bool = False
+        cls, channel_ids: list[str] | str = None, do_nothing: bool = False
     ):
         if not channel_ids:
             channel_ids = await cls.get_ids(
@@ -119,7 +119,7 @@ class ChannelDAO(BaseDAO):
             )
         data = yt.channel_list(channel_ids, obj_type="detail")
         if data:
-            await cls.add_update_bulk(data, skip_if_exist=skip_if_exist)
+            await cls.add_update_bulk(data, do_nothing=do_nothing)
         return data
 
     @classmethod
@@ -157,7 +157,7 @@ class ChannelDAO(BaseDAO):
         unique_channel_ids = list(set(video["channel_id"] for video in data))
         logger.info(f"Find {len(unique_channel_ids)} unique channels")
 
-        return await cls.update_detail(unique_channel_ids, skip_if_exist=True)
+        return await cls.update_detail(unique_channel_ids, do_nothing=True)
 
     @classmethod
     async def search_new_by_category_period(
@@ -200,6 +200,6 @@ class ChannelStatDAO(BaseDAO):
 
         if data:
             for item in data:
-                item["report_period"] = report_period._date
+                item["report_period"] = report_period
             await cls.add_bulk(data)
         return data

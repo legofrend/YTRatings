@@ -35,9 +35,11 @@ class VideoDAO(BaseDAO):
                         from video as v
                         left join channel as c on c.channel_id = v.channel_id
                         left join video_stat vs on v.video_id = vs.video_id and vs.report_period = '{report_period.strf()}'
-                        where c.category_id={category_id} and vs.id is null and v.published_at_period >= '{published_at_period.strf()}'
+                        where vs.id is null and v.published_at_period >= '{published_at_period.strf()}'
                         ;
                     """
+            if category_id:
+                query += f" and c.category_id={category_id}"
             query = text(query)
             result = await session.execute(query)
             data = result.mappings().all()
@@ -45,37 +47,30 @@ class VideoDAO(BaseDAO):
             return data
 
     @classmethod
-    async def update_detail(
-        cls, video_ids: list[str] | str = None, skip_if_exist: bool = False
-    ):
+    async def update_detail(cls, video_ids: list[str] | str = None):
         if not video_ids:
             video_ids = await cls.get_ids(
                 filters={
                     "duration": None,
                 }
             )
-        data = yt.video_list(video_ids, obj_type="detail")
-        if not data:
-            return None
-        video_ids = [item["video_id"] for item in data if item.get("is_short") is None]
-        data_shorts = yt.check_shorts(video_ids)
-        data_shorts = {item["video_id"]: item["is_short"] for item in data_shorts}
-        for item in data:
-            is_short = data_shorts.get(item["video_id"])
-            if item.get("is_short") is None and is_short is not None:
-                item["is_short"] = is_short
-                item["video_url"] = (
-                    "https://www.youtube.com/"
-                    + ("shorts/" if is_short else "watch?v=")
-                    + item["video_id"]
-                )
+            if not video_ids:
+                return None
+        try:
+            data = yt.video_list(video_ids, obj_type="detail")
+            if not data:
+                return None
+            await yt.check_shorts(data)
+            await cls.update_bulk(data)
+        except:
+            logger.error("Can't update video detail", exc_info=True)
+            save_errors(data, "video_detail")
 
-        await cls.add_update_bulk(data, skip_if_exist=skip_if_exist)
         return data
 
     @classmethod
     async def update_is_short(
-        cls, video_ids: list[str] | str = None, skip_if_exist: bool = False
+        cls, video_ids: list[str] | str = None, do_nothing: bool = False
     ):
         if not video_ids:
             res = await cls.find_all(is_short=None)
@@ -83,7 +78,7 @@ class VideoDAO(BaseDAO):
 
         data = yt.check_shorts(video_ids)
         if data:
-            await cls.add_update_bulk(data, skip_if_exist=skip_if_exist)
+            await cls.add_update_bulk(data, do_nothing=do_nothing)
         return data
 
     @classmethod
@@ -102,7 +97,7 @@ class VideoDAO(BaseDAO):
             raise Exception("Invalid period")
 
         data = []
-        # TODO: check multiple channels query
+
         for index in range(0, len(channel_ids)):
             channel_id = channel_ids[index]
             logger.info(f"{index+1}/{len(channel_ids)}: {channel_id}")
@@ -112,11 +107,11 @@ class VideoDAO(BaseDAO):
                     published=period,
                     type="video",
                     channel_id=channel_id,
-                    order="viewCount",
-                    max_result=1000,
+                    order="date",
+                    max_result=500,
                 )
                 if videos:
-                    await cls.add_update_bulk(videos, skip_if_exist=True)
+                    await cls.add_update_bulk(videos, do_nothing=True)
                     data.extend(videos)
 
             except Exception as e:
@@ -184,7 +179,7 @@ class VideoStatDAO(BaseDAO):
 
         if data:
             for item in data:
-                item["report_period"] = report_period.strf()
+                item["report_period"] = report_period
             await cls.add_bulk(data)
         return data
 

@@ -27,6 +27,7 @@ class Channel(Base):
     thumbnail_url: Mapped[Optional[str]]
     custom_url: Mapped[Optional[str]]
     status: Mapped[Optional[int]]
+    last_video_fetch_dt: Mapped[Optional[datetime]]
 
 
 class ChannelStat(Base):

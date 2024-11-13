@@ -1,12 +1,16 @@
 import asyncio
+import time
+import nest_asyncio
+import aiohttp
 from typing import Literal
 from googleapiclient.discovery import build
 from datetime import datetime, timedelta
 import re
-import aiohttp
 
 from app.logger import logger
 from app.config import settings
+
+nest_asyncio.apply()
 
 
 YT_TIME_REGEX = re.compile(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?")
@@ -189,8 +193,7 @@ def parse_response(response, type: TableType) -> list[dict]:
             published_period_dt = published_dt.replace(day=1)
 
         if type == "video":
-            is_short = 0
-            url = "https://www.youtube.com/" + ("watch?v=" if is_short else "shorts/")
+            url = "https://www.youtube.com/watch?v=" + item["id"]["videoId"]
             val = {
                 "video_id": item["id"]["videoId"],
                 "channel_id": item["snippet"]["channelId"],
@@ -199,7 +202,7 @@ def parse_response(response, type: TableType) -> list[dict]:
                 "published_at": published_dt,
                 "published_at_period": published_period_dt,
                 # shorts/item["id"]["videoId"]
-                "video_url": url + item["id"]["videoId"],
+                "video_url": url,
                 "thumbnail_url": item["snippet"]["thumbnails"]["high"]["url"],
             }
         elif type == "channel":
@@ -239,12 +242,15 @@ def parse_response(response, type: TableType) -> list[dict]:
             # Определение типа видео (short или обычное)
             video_id = item.get("id")
             duration = parse_yt_time(item["contentDetails"].get("duration", ""))
-            is_short = 0 if duration > 65 else None  # Если меньше 1 минуты
+            is_short = (
+                0 if duration > 65 else None
+            )  # Если больше 1 минуты, то точно не short
 
             val = {
                 "video_id": video_id,
                 "duration": duration,
                 "is_short": is_short,
+                "video_url": f"https://www.youtube.com/watch?v={video_id}",
             }
 
         data.append(val)
@@ -252,7 +258,50 @@ def parse_response(response, type: TableType) -> list[dict]:
     return data
 
 
-async def check_short(video_id: str):
+async def check_short(video: dict):
+    video_id = video["video_id"]
+    url = f"https://www.youtube.com/shorts/{video_id}"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as response:
+            if response.status == 200:
+                video["is_short"] = True  # Это шорт
+            elif response.status == 303:
+                video["is_short"] = False  # Это обычное видео
+                url = f"https://www.youtube.com/watch?v={video_id}"
+            else:
+                logger.error(f"{video_id=}, status={response.status}")
+                video["is_short"] = None  # Не удалось определить
+    # video["is_short"] = is_short
+    video["video_url"] = url
+    return video["is_short"]
+
+
+async def limited_gather(sem, tasks):
+    async with sem:
+        time.sleep(0.5)
+        return await asyncio.gather(*tasks)
+
+
+async def check_shorts(data: list[dict]):
+    tasks = []
+    limit = 50
+    for item in data:
+        if item.get("is_short") is None or item.get("is_short") == "":
+            tasks.append(check_short(item))
+
+    # ограничиваем до limit одновременно выполняемых задач
+    sem = asyncio.Semaphore(limit)
+    results = await asyncio.gather(
+        *(
+            limited_gather(sem, tasks[i : i + limit])
+            for i in range(0, len(tasks), limit)
+        )
+    )
+
+    return results
+
+
+async def check_short_old(video_id: str):
     url = f"https://www.youtube.com/shorts/{video_id}"
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as response:
@@ -268,11 +317,11 @@ async def check_short(video_id: str):
                 + ("shorts/" if is_short else "watch?v=")
                 + video_id
             )
-            val = {"video_id": video_id, "is_short": is_short, "video_url": url}
-            return val
+            # val = {"video_id": video_id, "is_short": is_short, "video_url": url}
+            return is_short, url
 
 
-def check_shorts(video_ids: list[str]):
+def check_shorts_sync(video_ids: list[str]):
 
     import time
 
