@@ -172,7 +172,9 @@ class ChannelDAO(BaseDAO):
             # channel_ids = ChannelDAO.get_ids_wo_video(
             #     filters={"category_id": category_id, "report_period": period}
             # )
-            channel_ids = await cls.get_ids(filters={"category_id": category_id})
+            channel_ids = await cls.get_ids(
+                filters={"category_id": category_id, "status": 1}
+            )
             await VideoDAO.search_new_by_channel_period(channel_ids, period)
             logger.info(
                 f"Updated {len(channel_ids)} channels for category {category_id}"

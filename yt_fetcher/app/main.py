@@ -18,22 +18,25 @@ from app.channel import ChannelDAO, ChannelStatDAO, VideoDAO, VideoStatDAO
 # 6	Кино
 # 7	Нейросети
 
+# Игры и гейминг
+# Лайфстайл и влоги
+# Здоровье и фитнес
+# Научно-популярные каналы
+# Финансовая грамотность и инвестиции
+# Кулинария и рецепты
+# Путешествия и туризм
+# Технологии и гаджеты
+# Красота и мода
+# Образование и саморазвитие
+
 
 async def actions():
-    category_id = 5
-    period = Period(10)
-    per_range = [date(2024, 11, 1), date(2024, 11, 13)]
+    category_id = 1
+    period = Period(11)
+    per_range = [date(2024, 11, 1), date(2024, 11, 27)]
 
     start_dt = datetime.now()
     print("Start", start_dt)
-
-    # async with async_session_maker() as session:
-    #     print(type(data))
-    #     query = insert(Category).values(data)  # .returning(cls.model.id)
-    #     result = await session.execute(query)
-    #     await session.commit()
-    #     # return result.mappings().first()
-    #     return True
 
     # await ChannelDAO.search_by_keywords(
     #     "нейросети",
@@ -43,7 +46,7 @@ async def actions():
     #     max_result=150,
     # )
 
-    names = "@kurchanovalex @proboknet_".split(" ")  #
+    names = "@MarvelDCRU @lebovsky".split(" ")  #
 
     # ch_ids = await ChannelDAO.add_channels(names, category_id=category_id)
     # for name in names:
@@ -55,14 +58,14 @@ async def actions():
 
     # await ChannelStatDAO.update_stat(report_period=period)
 
-    # await ChannelDAO.search_new_by_category_period(
-    #     period=period, category_ids=category_id
-    # )
+    await ChannelDAO.search_new_by_category_period(
+        period=period, category_ids=category_id
+    )
     # or
-    ids = """UCrp2It0yWUC7XcrWyBIQeKw""".split("\n")
+    # ids = """UCrp2It0yWUC7XcrWyBIQeKw""".split("\n")
 
     # await VideoDAO.search_new_by_channel_period(period=per_range, channel_ids=ids)
-    await VideoDAO.update_detail()
+    # await VideoDAO.update_detail()
 
     # await VideoStatDAO.update_stat(report_period=period, category_id=None)
 
@@ -71,15 +74,12 @@ async def actions():
     # for category_id in [1, 5]:
     #     await ReportDAO.build(period, category_id)
 
-    # await ReportDAO.generate_info_images(period, category_id)
+    # tmpl_path = "../video_gen/2024-10/Политика/tmpl.png"
+    # await ReportDAO.generate_info_images(
+    #     tmpl_path, period, category_id, top_channels=20, top_videos_count=0
+    # )
 
-    # from app.report.tools import gen_script
-
-    # tmpl_file = "../video_gen/templates/script_tmpl_auto_short.txt"
-    # output_file = "../video_gen/2024-10/Авто/script.txt"
-    # report = await ReportDAO.get(period, category_id)
-
-    # gen_script(report.data[:5], tmpl_file, output_file)
+    await VideoDAO.eval_clickbait({"published_at_period": period})
 
     print("Finish after ", datetime.now() - start_dt)
 

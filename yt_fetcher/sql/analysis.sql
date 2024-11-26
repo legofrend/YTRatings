@@ -42,8 +42,6 @@ update channel set last_video_fetch_dt = '2024-11-01'::date where last_video_fet
 
 -------------------------------------------------------------
 
-update video set is_short = True where duration<60 and is_short is FALSE and id>25000
-
 select * from channel_period_top_videos limit 3;
 
 select * from report where category_id = 6 and report_period='2024-10-01';
@@ -114,7 +112,7 @@ select video_id, title from channel_period_top_videos
 -- Channels in the rank order for the specific period and category
 select r.channel_id, r.channel_title
 from report_view as r
-where report_period = '2024-10-01' and category_id=7;
+where report_period = '2024-10-01' and category_id=5;
 
 update channel set status = 0 where channel_id in ()
 
@@ -157,3 +155,18 @@ where c.status=1 and c.category_id >= 5 and v.video_id is null
 --     and c.channel_id='UCFkngbKHD8Qd9XxGrgpF59Q'
 order by 1
 
+select published_at_period, video_id, title, is_clickbait, clickbait_comment
+from video
+where is_clickbait is not null
+order by 1 desc
+
+select published_at_period, category_id,
+       sum(case when v.is_clickbait is null then 1 else 0 end) as cb_null,
+       sum(case when v.is_clickbait is True then 1 else 0 end) as cb_True,
+       sum(case when v.is_clickbait is False then 1 else 0 end) as cb_False
+from video as v
+left join channel as c on c.channel_id = v.channel_id
+where  v.is_short = False
+and published_at_period >= '2024-07-01'
+group by 1, 2
+order by 1, 2

@@ -1,4 +1,5 @@
 from datetime import date
+import os
 
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
@@ -11,7 +12,8 @@ from app.period import Period
 
 from app.report.models import Report
 from app.report.schemas import SMetaData, SReport
-from app.report.tools import render_info_pic
+from app.report.tools import render_info_pic, gen_script
+
 
 from app.channel import (
     SChannel,
@@ -178,13 +180,37 @@ class ReportDAO(BaseDAO):
     @classmethod
     async def generate_info_images(
         cls,
+        tmpl_path: str,
         period: Period,
         category_id: int,
         top_channels: int = 10,
         top_videos_count: int = 1,
+        output_dir: str = None,
     ):
         report = await cls.get(period, category_id)
         data = report.data
 
         for item in data[:top_channels]:
-            render_info_pic(report.period, report.category.name, item, top_videos_count)
+            render_info_pic(
+                tmpl_path,
+                report.period,
+                report.category.name,
+                item,
+                top_videos_count,
+                output_dir,
+            )
+
+    @classmethod
+    async def generate_script(
+        cls, tmpl_path: str, period: Period, category_id: int, output_file: str = None
+    ):
+        report = await ReportDAO.get(period, category_id)
+        if not output_file:
+            parent_dir = r"../video_gen/"
+            output_dir = output_file or os.path.join(
+                parent_dir, period.strftime("%Y-%m"), report.category.name
+            )
+            output_file = os.path.join(output_dir, "script.txt")
+            os.makedirs(output_dir, exist_ok=True)
+
+        gen_script(report.data, tmpl_path, output_file)

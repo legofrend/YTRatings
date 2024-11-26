@@ -45,6 +45,8 @@ def get_abs_xy(xy: tuple, align: str, bbox: tuple) -> tuple:
     match align:
         case "cc":
             nxy = (xy[0] - bbox[2] // 2, xy[1] - (bbox[1] + bbox[3]) // 2)
+        case "tc":
+            nxy = (xy[0] - bbox[2] // 2, xy[1])
         case "tl":
             nxy = xy
         case "tr":
@@ -61,10 +63,10 @@ def draw_value(
     xy: tuple,
     align: str,
     font_size: int,
-    value: int,
+    value: int | str,
     is_change: bool = False,
 ):
-    text = display_value(value)
+    text = display_value(value) if isinstance(value, int) else value
     color = "black" if not is_change else color_value(value)
     font = ImageFont.truetype("arial.ttf", font_size)
 
@@ -75,21 +77,61 @@ def draw_value(
         xy_sign = (xy[0] - r // 2, xy[1] + 2 * r - (r // 2 if value < 0 else 0))
         rot = 180 if value < 0 else 0
         draw.regular_polygon((xy_sign, r), 3, rotation=rot, fill=color)
-        xy[0] += r // 2
+        xy = (xy[0] + r // 2, xy[1])
 
-    draw.text(xy, text, fill=color, font=font)
+    align_dict = {
+        "c": "center",
+        "l": "left",
+        "r": "right",
+    }
+    align_text = align_dict[align[1]]
+    draw.multiline_text(xy, text, fill=color, font=font, align=align_text)
+
+
+def split_text(text: str, limit: int):
+    words = text.split()
+    lines = []
+    current_line = ""
+
+    for word in words:
+        # Проверяем, помещается ли слово в текущую строку
+        if len(current_line) + len(word) + 1 <= limit:
+            if current_line:
+                current_line += " "  # Добавляем пробел перед словом
+            current_line += word
+        else:
+            # Если текущее слово не помещается, добавляем текущую строку в вывод
+            if current_line:
+                lines.append(current_line)
+            # Проверяем, помещается ли слово с переносом
+            while len(word) > limit:
+                lines.append(word[:limit] + "-")
+                word = word[limit:]
+            current_line = word  # Начинаем новую строку с текущего слова
+
+    if current_line:
+        lines.append(current_line)  # Добавляем последнюю строку
+
+    return "\n".join(lines)
 
 
 def render_info_pic(
-    period: date, category_name: str, channel: SChannel, top_videos_count: int = 1
+    tmpl_path: str,
+    period: date,
+    category_name: str,
+    channel: SChannel,
+    top_videos_count: int = 1,
+    output_dir: str = None,
 ):
 
     # Prepare variables
     parent_dir = r"..\video_gen\\"
-    work_dir = os.path.join(parent_dir, "templates")
-    tmpl_path = os.path.join(work_dir, "tmpl.png")
-    star_path = os.path.join(work_dir, "star.png")
-    output_dir = os.path.join(parent_dir, period.strftime("%Y-%m"), category_name)
+    # work_dir = os.path.join(parent_dir, "templates")
+    # tmpl_path = os.path.join(work_dir, "tmpl_movie.png")
+    # star_path = os.path.join(work_dir, "star.png")
+    output_dir = output_dir or os.path.join(
+        parent_dir, period.strftime("%Y-%m"), category_name
+    )
     os.makedirs(output_dir, exist_ok=True)
 
     output_file = os.path.join(output_dir, str(channel.rank) + ".png")
@@ -104,7 +146,7 @@ def render_info_pic(
     # download thumbnails for top videos
     if top_videos_count > 0:
         for index, video in enumerate(channel.top_videos[:top_videos_count], start=1):
-            video_file = os.path.join(output_dir, f"{channel.rank}_{index}.jpg")
+            video_file = os.path.join(output_dir, f"v_{channel.rank}_{index}.jpg")
             if not os.path.exists(video_file):
                 download_file(video.thumbnail_url, video_file)
 
@@ -114,19 +156,38 @@ def render_info_pic(
     # Load and paste logo
     logo = Image.open(logo_file)
     logo = logo.resize((320, 320), Image.LANCZOS)
-    logo_position = (140, 140)
-    image.paste(logo, logo_position)
+    image.paste(logo, (128, 330))
 
     # Load and paste 10x star in the top-left corner
-    star = Image.open(star_path)
-    image.paste(star, (0, 0), star)
+    # star = Image.open(star_path)
+    # image.paste(star, (0, 0), star)
 
     # Render values into template
     draw = ImageDraw.Draw(image)
+
     draw_value(draw, (100, 100), "cc", 96, channel.rank)
-    draw_value(draw, (500, 100), "cc", 45, channel.rank_change, True)
-    draw_value(draw, (170, 480), "tl", 24, channel.stat.score)
-    draw_value(draw, (460, 480), "tr", 24, channel.stat.score_change, True)
+    if channel.rank_change:
+        draw_value(draw, (500, 100), "cc", 45, channel.rank_change, True)
+
+    title = split_text(channel.channel_title, 20)
+    draw_value(draw, (56 + 463 // 2, 194 + 137 // 2), "cc", 36, title)
+
+    draw_value(draw, (260, 668), "tl", 24, channel.stat.score)
+    if channel.stat.score_change:
+        draw_value(draw, (347, 668), "tl", 24, channel.stat.score_change, True)
+
+    draw_value(draw, (260, 705), "tl", 24, channel.stat.subscriber_count)
+    # if channel.stat.subscriber_count_change:
+    #     draw_value(draw, (347, 705), "tl", 24, channel.stat.score_change, True)
+    video_count = channel.stat.videos - channel.stat.shorts
+    draw_value(draw, (260, 740), "tl", 24, video_count)
+    draw_value(draw, (380, 740), "tl", 24, channel.stat.shorts)
+
+    video_title = split_text(channel.top_videos[0].title, 40)
+    # draw_value(draw, (100 + 387 // 2, 824 + 80 // 2), "cc", 12, video_title)
+    draw_value(draw, (100, 830), "tl", 12, video_title)
+    video_view = channel.top_videos[0].stat.view_count
+    draw_value(draw, (332, 804), "tl", 20, video_view)
 
     image.save(output_file)
     return True

@@ -6,6 +6,7 @@ from app.database import async_session_maker
 from app.logger import logger, save_errors
 from app.period.period import Period
 import app.api.ytapi as yt
+import app.api.openaiapi as oai
 
 from app.channel.video.models import Video, VideoStat
 
@@ -143,21 +144,31 @@ class VideoDAO(BaseDAO):
                 download_file(file_url, full_path)
 
     @classmethod
-    async def update_clickbait(cls, data: list[dict]):
-        # TODO rewrite this method
-        # is_click_bait = [
-        #     {
-        #         "video_id": "b4PjXdjVRxk",
-        #         "is_clickbait": 1,
-        #         "clickbait_comment": "Заголовок провокационен и использует драматические элементы, чтобы привлечь внимание."
-        #     }
-        # ]
-        for item in data:
-            try:
-                id = item.pop("video_id")
-                await VideoDAO.update(id, "video_id", **item)
-            except Exception as e:
-                logger.error(e)
+    async def eval_clickbait(cls, filters: dict = {}):
+        LIMIT = 50
+        instructions = """Ты на вход получишь данные с video_id и заголовком видео, разделенных табом. Для каждого заголовка тебе нужно определить, является ли он кликбейт и почему (clickbait_comment). Кликбейт — это термин, описывающий веб-контент, целью которого является получение дохода от онлайн-рекламы, особенно в ущерб качеству или точности информации. Пожалуйста, выведи только массив объектов в JSON формате:
+
+[ { "video_id": <>, "is_clickbait": 1 or 0, "clickbait_comment": <> }, ... ]
+
+Не добавляй в ответ никаких дополнительных слов, символов или переносов строк. Вот входные данные:"""
+
+        if "is_clickbait" not in filters.keys():
+            filters["is_clickbait"] = None
+        if "is_short" not in filters.keys():
+            filters["is_short"] = False
+        videos = await cls.find_all(**filters)
+
+        for i in range(0, len(videos), LIMIT):
+            data = [
+                (item["video_id"] + "\t" + item["title"])
+                for item in videos[i : (i + LIMIT)]
+            ]
+
+            prompt = instructions + "\n".join(data) + "\n"
+            response = oai.chat_with_gpt(prompt, is_json=True, temperature=0.5)
+            if response:
+                await cls.update_bulk(response)
+            logger.info(f"Progress: {i+LIMIT}/{len(videos)}")
 
 
 class VideoStatDAO(BaseDAO):

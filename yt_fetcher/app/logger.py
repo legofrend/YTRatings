@@ -40,7 +40,16 @@ def save_errors(errors, type: str):
     filename = (
         "logs/" + datetime.now().strftime("%Y-%m-%d-%H-%M-%S") + f"{type}_errors_.csv"
     )
-    save_json_csv(errors, filename)
+    if isinstance(errors, str):
+        with open(filename, "w", encoding="utf-8") as file:
+            file.write(errors)
+        return True
+    try:
+        save_json_csv(errors, filename)
+    except Exception as e:
+        with open(filename, "w", encoding="utf-8") as file:
+            file.write(errors)
+    return True
 
 
 #####################################
