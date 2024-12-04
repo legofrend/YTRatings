@@ -38,17 +38,31 @@ WHERE channel_id IN (
 
 update channel set status = null where category_id=7
 
-update channel set last_video_fetch_dt = '2024-11-01'::date where last_video_fetch_dt is null and status > 0;
-
+update channel set last_video_fetch_dt = '2024-12-01'::date where
+                                                                 status > 0 and category_id=7 ;
+-- last_video_fetch_dt is null and
 -------------------------------------------------------------
 
 select * from channel_period_top_videos limit 3;
 
 select * from report where category_id = 6 and report_period='2024-10-01';
 
-select * from report_view where category_id = 5 and report_period='2024-10-01'
+select * from report_view where category_id > 0 and report_period='2024-11-01'
 -- and channel_id = 'UCFkngbKHD8Qd9XxGrgpF59Q'
 
+select c2.id, c2.name, rv.rank, c.id, c.channel_id, c.channel_title, c.custom_url, last_video_fetch_dt
+from channel as c
+left join report_view rv on c.channel_id = rv.channel_id and rv.report_period = '2024-10-01'
+left join category c2 on c.category_id = c2.id
+where c.status > 0
+order by 1, 2, 3
+
+select category_id, c.name, count(*)
+from channel
+left join category c on channel.category_id = c.id
+where status=1
+group by 1, 2
+order by 1
 
 -- info about channel merged with stat and info about videos in the period
 select
@@ -124,8 +138,10 @@ select c.channel_id, c.channel_title,
        sum(case  when vs.id is null then 1 else 0 end) as no_stat
 from video as v
 left join channel as c on c.channel_id = v.channel_id
-left join video_stat vs on v.video_id = vs.video_id
-where c.category_id=7
+left join video_stat vs on v.video_id = vs.video_id and vs.report_period='2024-11-01'
+where c.status=1
+and v.published_at_period>='2024-10-01'
+--     c.category_id=7
 group by 1, 2
 ;
 
@@ -166,7 +182,8 @@ select published_at_period, category_id,
        sum(case when v.is_clickbait is False then 1 else 0 end) as cb_False
 from video as v
 left join channel as c on c.channel_id = v.channel_id
-where  v.is_short = False
-and published_at_period >= '2024-07-01'
+where   published_at_period >= '2024-10-01'
+and v.is_short = False
+
 group by 1, 2
 order by 1, 2

@@ -37,7 +37,6 @@ class VideoDAO(BaseDAO):
                         left join channel as c on c.channel_id = v.channel_id
                         left join video_stat vs on v.video_id = vs.video_id and vs.report_period = '{report_period.strf()}'
                         where vs.id is null and v.published_at_period >= '{published_at_period.strf()}'
-                        ;
                     """
             if category_id:
                 query += f" and c.category_id={category_id}"

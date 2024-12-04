@@ -1,5 +1,5 @@
 -- 1. video view change MoM
-DROP VIEW IF EXISTS video_stat_change;
+DROP VIEW IF EXISTS video_stat_change cascade;
 create view video_stat_change as
 select
     c.category_id,
@@ -7,6 +7,7 @@ select
     v.published_at_period as published_period,
     v.channel_id,
     cur.video_id,
+    case when v.is_clickbait=True then 1 else 0 end as is_clickbait,
     case when cur.report_period=v.published_at_period then 1 else 0 end as is_new,
     case when v.is_short then 1 else 0 end as is_short,
     v.duration,
@@ -65,7 +66,8 @@ select
     sum(score) as score,
     sum(view_count) as view_count,
     sum(like_count) as like_count,
-    sum(comment_count) as comment_count
+    sum(comment_count) as comment_count,
+    sum(is_clickbait) as clickbait_count
 from video_stat_change as vs
 group by 1, 2, 3, 4, 5, 6
 having count(*)>0;
@@ -80,15 +82,17 @@ select
     vs.report_period,
     vs.channel_id,
     sum(score) as score,
-    sum(videos*is_new) as videos,
+    sum(videos*is_new*(1-is_short)) as videos,
+    sum(clickbait_count*is_new*(1-is_short)) as video_clickbaits,
     sum(videos*is_new*is_short) as shorts,
     sum(duration*is_new) as duration,
     sum(view_count) as view_count,
     sum(like_count) as like_count,
     sum(comment_count) as comment_count,
-    sum(score * is_short) as score_shorts,
-    sum(score * is_new) as score_new,
-    sum(score * (1 - is_new)) as score_old
+    sum(view_count * is_new*(1-is_short)) as view_count_new_video,
+    sum(view_count * is_new*is_short) as view_count_new_short,
+    sum(view_count * (1 - is_new)*(1-is_short)) as view_count_old_video,
+    sum(view_count * (1 - is_new)*is_short) as view_count_old_short
 from video_stat_subgroup as vs
 group by 1,2, 3),
 ranked AS (
@@ -127,9 +131,9 @@ select
     cur.channel_view_count,
     cur.video_count,
     cur.subscriber_count,
-    case when pr.id is null then null else (cur.channel_view_count - pr.channel_view_count) end as view_change,
-    case when pr.id is null then null else (cur.video_count - pr.video_count) end as video_change,
-    case when pr.id is null then null else (cur.subscriber_count - pr.subscriber_count) end as subscriber_change
+    case when pr.id is null then null else (cur.channel_view_count - pr.channel_view_count) end as total_view_count_change,
+    case when pr.id is null then null else (cur.video_count - pr.video_count) end as total_video_change,
+    case when pr.id is null then null else (cur.subscriber_count - pr.subscriber_count) end as subscriber_count_change
 from channel as c
 left join channel_stat as cur on cur.channel_id = c.channel_id
 left join channel_stat as pr on pr.channel_id = c.channel_id and pr.report_period = (cur.report_period - INTERVAL '1 month')
@@ -147,9 +151,10 @@ select
     ch.custom_url,
     ch.description,
     cs.subscriber_count,
-    cs.subscriber_change,
-    cs.video_change,
-    cs.view_change
+    cs.subscriber_count_change,
+    cs.total_video_change,
+    cs.total_view_count_change,
+    cs.total_view_count_change - c.view_count as view_count_check
 from channel_period_top_change as c
 left join channel_stat_change cs on c.channel_id = cs.channel_id and c.report_period = cs.report_period
 left join channel as ch on ch.channel_id = c.channel_id
@@ -170,7 +175,7 @@ SELECT
     v.title,
     v.video_url,
     v.thumbnail_url,
-    v.is_clickbait,
+--     v.is_clickbait,
     v.clickbait_comment
 FROM ranked as r
 left join video as v on v.video_id = r.video_id;

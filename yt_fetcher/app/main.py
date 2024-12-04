@@ -33,7 +33,7 @@ from app.channel import ChannelDAO, ChannelStatDAO, VideoDAO, VideoStatDAO
 async def actions():
     category_id = 1
     period = Period(11)
-    per_range = [date(2024, 11, 1), date(2024, 11, 27)]
+    per_range = [date(2024, 11, 27), date(2024, 12, 1)]
 
     start_dt = datetime.now()
     print("Start", start_dt)
@@ -46,7 +46,7 @@ async def actions():
     #     max_result=150,
     # )
 
-    names = "@MarvelDCRU @lebovsky".split(" ")  #
+    names = "".split(" ")  #
 
     # ch_ids = await ChannelDAO.add_channels(names, category_id=category_id)
     # for name in names:
@@ -58,18 +58,19 @@ async def actions():
 
     # await ChannelStatDAO.update_stat(report_period=period)
 
-    await ChannelDAO.search_new_by_category_period(
-        period=period, category_ids=category_id
-    )
+    # await ChannelDAO.search_new_by_category_period(
+    #     period=per_range, category_ids=category_id
+    # )
     # or
-    # ids = """UCrp2It0yWUC7XcrWyBIQeKw""".split("\n")
+    ids = """""".split("\n")
 
     # await VideoDAO.search_new_by_channel_period(period=per_range, channel_ids=ids)
     # await VideoDAO.update_detail()
 
     # await VideoStatDAO.update_stat(report_period=period, category_id=None)
 
-    # await ReportDAO.build(period, category_id)
+    for category_id in (1, 5, 6, 7):
+        await ReportDAO.build(period, category_id)
 
     # for category_id in [1, 5]:
     #     await ReportDAO.build(period, category_id)
@@ -79,7 +80,7 @@ async def actions():
     #     tmpl_path, period, category_id, top_channels=20, top_videos_count=0
     # )
 
-    await VideoDAO.eval_clickbait({"published_at_period": period})
+    # await VideoDAO.eval_clickbait({"published_at_period": period})
 
     print("Finish after ", datetime.now() - start_dt)
 

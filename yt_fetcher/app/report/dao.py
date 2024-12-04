@@ -108,11 +108,12 @@ class ReportDAO(BaseDAO):
             return None
 
         res = await cls.add_or_update(
-            val={
-                "report_period": period.strf(),
+            data={
+                "report_period": period,
                 "category_id": category_id,
                 "data": data,
-            }
+            },
+            do_nothing=True,
         )
         msg = f"report for {period}, category {category_id}: {res}"
         if not res:
@@ -123,7 +124,7 @@ class ReportDAO(BaseDAO):
         return res
 
     @classmethod
-    async def get(cls, period: Period | date | str, category_id: int) -> SReport:
+    async def get(cls, period: Period | date | str, category_id: int):
         if isinstance(period, (str)):
             period = Period.parse(period)
 
@@ -148,7 +149,8 @@ class ReportDAO(BaseDAO):
             "data": data,
         }
 
-        return SReport(**result)
+        return result
+        # return SReport(**result)
 
     @classmethod
     async def metadata(cls) -> list[SMetaData]:

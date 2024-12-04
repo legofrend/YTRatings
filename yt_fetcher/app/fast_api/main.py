@@ -3,14 +3,16 @@ import time
 from fastapi import FastAPI, applications
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
-from fastapi_cache import Cache
-from fastapi_cache.backends.inmemory import InMemoryCache
+
+from fastapi_cache import FastAPICache
+from fastapi_cache.backends.inmemory import InMemoryBackend
 from fastapi_cache.decorator import cache
 
 from starlette.requests import Request
 
 from app.logger import logger
 from app.report.dao import ReportDAO
+from contextlib import asynccontextmanager
 
 
 def swagger_monkey_patch(*args, **kwargs):
@@ -22,13 +24,17 @@ def swagger_monkey_patch(*args, **kwargs):
     )
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Инициализация кэша
+    FastAPICache.init(InMemoryBackend())
+    yield  # Здесь можно выполнить код при завершении работы приложения
+    FastAPICache.clear()  # Очистка кэша (если требуется)
+
+
 applications.get_swagger_ui_html = swagger_monkey_patch
 
-app = FastAPI(
-    title="End-Up API",
-    version="0.1.0",
-    root_path="/api",
-)
+app = FastAPI(title="End-Up API", version="0.1.0", root_path="/api", lifespan=lifespan)
 
 origins = [
     "http://localhost:8080",
@@ -52,10 +58,6 @@ app.add_middleware(
         "Authorization",
     ],
 )
-
-# Инициализация кэша
-cache = Cache(InMemoryCache())
-cache.init_app(app)
 
 
 # Эндпоинт для отдачи страницы index.html при заходе на домен

@@ -9,17 +9,22 @@ from app.channel.video.schemas import SVideo
 
 class SChannelStat(BaseModel):
     videos: int | None = Field(ge=0)
+    video_clickbaits: int | None  # new
     shorts: int | None
     duration: int | None
     score: int | None
     score_change: int | None
     view_count: int | None
+    view_count_new_video: int | None  # new
+    view_count_new_short: int | None  # new
+    view_count_old_video: int | None  # new
+    view_count_old_short: int | None  # new
+    total_view_count_change: int | None  # new
+    view_count_check: int | None  # new
     like_count: int | None
     comment_count: int | None
     subscriber_count: int | None
-    score_new: int | None
-    score_old: int | None
-    score_shorts: int | None
+    subscriber_count_change: int | None  # new
 
     model_config = ConfigDict(from_attributes=True)
 

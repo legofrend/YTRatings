@@ -42,7 +42,7 @@ async function fetchData(category_id, period) {
   console.log('fetchData: category_id=', category_id, ', period=', period)
 
   try {
-    const response = await axios.get('report/', {
+    const response = await axios.get('report', {
       params: {
         category_id: category_id,
         period: period
@@ -64,7 +64,7 @@ async function fetchData(category_id, period) {
 async function fetchMetaData() {
   // console.log('fetchMetaData')
   try {
-    const response = await axios.get('metadata/');
+    const response = await axios.get('metadata');
     console.log('response', response)
     metaData.value = response.data;
     // console.log('metaData', metaData.value)

@@ -92,6 +92,7 @@ class BaseDAO:
             async with async_session_maker() as session:
                 result = await session.execute(stmt)
                 await session.commit()
+            # TODO: fix, if do_nothing is True returns empty list as in case of error
             return result.mappings().first()
         except Exception as e:
             msg = "Add_or_update failed"
@@ -146,15 +147,16 @@ class BaseDAO:
                 for record in data:
                     # Получаем channel_id для обновления
                     id = record.pop(identifier, None)
-                    if id:
-                        query = (
-                            update(cls.model)
-                            .filter_by(**{identifier: id})
-                            .values(record)
-                            .returning(cls.model.id)
-                        )
-                        await session.execute(query)
-                        # result = await session.execute(query)
+                    if not id:
+                        raise Exception(f"{identifier} is not in data")
+                    query = (
+                        update(cls.model)
+                        .filter_by(**{identifier: id})
+                        .values(record)
+                        .returning(cls.model.id)
+                    )
+                    await session.execute(query)
+                    # result = await session.execute(query)
                 await session.commit()
                 # return result.mappings().all()
                 return True
