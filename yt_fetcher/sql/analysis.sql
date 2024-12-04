@@ -1,6 +1,7 @@
 -- Altering and update tables
 alter table video drop column is_short;
 alter table category add active boolean default True not null;
+alter table channel  add last_video_fetch_dt timestamp default Null;
 
 -- ! remove all data in the table
 TRUNCATE TABLE report RESTART IDENTITY;
@@ -36,15 +37,32 @@ WHERE channel_id IN (
 );
 
 update channel set status = null where category_id=7
+
+update channel set last_video_fetch_dt = '2024-12-01'::date where
+                                                                 status > 0 and category_id=7 ;
+-- last_video_fetch_dt is null and
 -------------------------------------------------------------
 
 select * from channel_period_top_videos limit 3;
 
-select * from report where category_id = 5 and report_period='2024-10-01';
+select * from report where category_id = 6 and report_period='2024-10-01';
 
-select * from report_view where category_id = 5 and report_period='2024-10-01'
-and channel_id = 'UCFkngbKHD8Qd9XxGrgpF59Q'
+select * from report_view where category_id > 0 and report_period='2024-11-01'
+-- and channel_id = 'UCFkngbKHD8Qd9XxGrgpF59Q'
 
+select c2.id, c2.name, rv.rank, c.id, c.channel_id, c.channel_title, c.custom_url, last_video_fetch_dt
+from channel as c
+left join report_view rv on c.channel_id = rv.channel_id and rv.report_period = '2024-10-01'
+left join category c2 on c.category_id = c2.id
+where c.status > 0
+order by 1, 2, 3
+
+select category_id, c.name, count(*)
+from channel
+left join category c on channel.category_id = c.id
+where status=1
+group by 1, 2
+order by 1
 
 -- info about channel merged with stat and info about videos in the period
 select
@@ -108,7 +126,7 @@ select video_id, title from channel_period_top_videos
 -- Channels in the rank order for the specific period and category
 select r.channel_id, r.channel_title
 from report_view as r
-where report_period = '2024-10-01' and category_id=7;
+where report_period = '2024-10-01' and category_id=5;
 
 update channel set status = 0 where channel_id in ()
 
@@ -120,8 +138,10 @@ select c.channel_id, c.channel_title,
        sum(case  when vs.id is null then 1 else 0 end) as no_stat
 from video as v
 left join channel as c on c.channel_id = v.channel_id
-left join video_stat vs on v.video_id = vs.video_id
-where c.category_id=7
+left join video_stat vs on v.video_id = vs.video_id and vs.report_period='2024-11-01'
+where c.status=1
+and v.published_at_period>='2024-10-01'
+--     c.category_id=7
 group by 1, 2
 ;
 
@@ -147,9 +167,23 @@ order by v.published_at
 select c.id, c.channel_id, c.channel_title
 from channel as c
 left join video v on v.channel_id = c.channel_id and v.published_at_period = '2024-10-01'
-where c.status=1 and c.category_id=7 and v.video_id is null
+where c.status=1 and c.category_id >= 5 and v.video_id is null
 --     and c.channel_id='UCFkngbKHD8Qd9XxGrgpF59Q'
 order by 1
 
+select published_at_period, video_id, title, is_clickbait, clickbait_comment
+from video
+where is_clickbait is not null
+order by 1 desc
 
+select published_at_period, category_id,
+       sum(case when v.is_clickbait is null then 1 else 0 end) as cb_null,
+       sum(case when v.is_clickbait is True then 1 else 0 end) as cb_True,
+       sum(case when v.is_clickbait is False then 1 else 0 end) as cb_False
+from video as v
+left join channel as c on c.channel_id = v.channel_id
+where   published_at_period >= '2024-10-01'
+and v.is_short = False
 
+group by 1, 2
+order by 1, 2

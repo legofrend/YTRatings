@@ -18,22 +18,25 @@ from app.channel import ChannelDAO, ChannelStatDAO, VideoDAO, VideoStatDAO
 # 6	Кино
 # 7	Нейросети
 
+# Игры и гейминг
+# Лайфстайл и влоги
+# Здоровье и фитнес
+# Научно-популярные каналы
+# Финансовая грамотность и инвестиции
+# Кулинария и рецепты
+# Путешествия и туризм
+# Технологии и гаджеты
+# Красота и мода
+# Образование и саморазвитие
+
 
 async def actions():
-    category_id = 7
+    category_id = 1
     period = Period(11)
-    per_range = [date(2024, 8, 1), date(2024, 10, 31)]
+    per_range = [date(2024, 11, 27), date(2024, 12, 1)]
 
     start_dt = datetime.now()
     print("Start", start_dt)
-
-    # async with async_session_maker() as session:
-    #     print(type(data))
-    #     query = insert(Category).values(data)  # .returning(cls.model.id)
-    #     result = await session.execute(query)
-    #     await session.commit()
-    #     # return result.mappings().first()
-    #     return True
 
     # await ChannelDAO.search_by_keywords(
     #     "нейросети",
@@ -43,29 +46,41 @@ async def actions():
     #     max_result=150,
     # )
 
-    names = "".split(" ")
+    names = "".split(" ")  #
+
     # ch_ids = await ChannelDAO.add_channels(names, category_id=category_id)
-    # await ChannelStatDAO.update_stat(report_period=period, channel_ids=ch_ids, category_id=category_id)
+    # for name in names:
+    #     await ChannelDAO.search_channel(name, category_id=category_id)
+    # await ChannelDAO.update_detail()
+    # await ChannelStatDAO.update_stat(
+    #     report_period=period, channel_ids=ch_ids, category_id=category_id
+    # )
 
-    # await ChannelStatDAO.update_stat(report_period=period, category_id=category_id)
+    # await ChannelStatDAO.update_stat(report_period=period)
 
-    # await VideoDAO.search_new_by_category_period(period=period, category_ids=category_id)
+    # await ChannelDAO.search_new_by_category_period(
+    #     period=per_range, category_ids=category_id
+    # )
     # or
-    #     ids = """""".split(
-    #         "\n"
-    #     )
-    # await VideoDAO.search_new_by_channel_period(period=period, channel_ids=ids)
+    ids = """""".split("\n")
 
-    # await VideoDAO.add_update_bulk(data, skip_if_exist=False)
-
+    # await VideoDAO.search_new_by_channel_period(period=per_range, channel_ids=ids)
     # await VideoDAO.update_detail()
 
-    # await VideoStatDAO.update_stat(report_period=period, category_id=category_id)
+    # await VideoStatDAO.update_stat(report_period=period, category_id=None)
 
-    # await ReportDAO.build(period, category_id)
+    for category_id in (1, 5, 6, 7):
+        await ReportDAO.build(period, category_id)
 
     # for category_id in [1, 5]:
     #     await ReportDAO.build(period, category_id)
+
+    # tmpl_path = "../video_gen/2024-10/Политика/tmpl.png"
+    # await ReportDAO.generate_info_images(
+    #     tmpl_path, period, category_id, top_channels=20, top_videos_count=0
+    # )
+
+    # await VideoDAO.eval_clickbait({"published_at_period": period})
 
     print("Finish after ", datetime.now() - start_dt)
 

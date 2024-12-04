@@ -26,10 +26,6 @@ def save_json(data_json, filename: str = "out_json.txt"):
         json.dump(data_json, json_file, indent=2, default=str, ensure_ascii=False)
 
 
-def save_df(df_data, filename: str = "out.csv"):
-    df_data.to_csv(filename, index=False, sep="\t", decimal=",")
-
-
 def save_json_csv(data_json, filename: str):
     # Сохраняем данные в CSV файл с табуляцией в качестве разделителя
     fieldnames = data_json[0].keys()
@@ -44,7 +40,16 @@ def save_errors(errors, type: str):
     filename = (
         "logs/" + datetime.now().strftime("%Y-%m-%d-%H-%M-%S") + f"{type}_errors_.csv"
     )
-    save_json_csv(errors, filename)
+    if isinstance(errors, str):
+        with open(filename, "w", encoding="utf-8") as file:
+            file.write(errors)
+        return True
+    try:
+        save_json_csv(errors, filename)
+    except Exception as e:
+        with open(filename, "w", encoding="utf-8") as file:
+            file.write(errors)
+    return True
 
 
 #####################################
