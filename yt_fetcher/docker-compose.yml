@@ -28,6 +28,7 @@ services:
       - 5001:5000
     networks:
       - o2t4_network
+    restart: always
 
 volumes:
   o2t4_postgresdata:

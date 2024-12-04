@@ -49,7 +49,7 @@ function formatTime(seconds) {
         <!-- <div title="Комментарии" v-if="stat.comment_count">🗨{{ ValDisplay(stat.comment_count) }}M</div> -->
         <div title="Подписчики" v-if="stat.subscriber_count">👤{{ ValDisplay(stat.subscriber_count) }}</div>
         <div title="Количество новых видео за месяц" v-if="stat.videos" class="flex items-center"><img class="h-3 mr-1"
-                src="/img/video.svg" alt="videos"> {{ stat.videos - stat.shorts }}
+                src="/img/video.svg" alt="videos"> {{ stat.videos }}
         </div>
         <div title="Количество новых клипов за месяц" v-if="stat.shorts" class="flex items-center"><img
                 class="h-3  mr-1" src="/img/short.svg" alt="shorts"> {{ stat.shorts }}
