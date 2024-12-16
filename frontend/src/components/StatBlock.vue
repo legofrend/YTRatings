@@ -17,10 +17,24 @@ const ValDisplay = (value) => {
     return value
 }
 
+const scoreTitle = computed(() => {
+    var val = ValDisplay(props.stat.score) + ' = ' + ValDisplay(props.stat.view_count_new_video) + ' + '
+        + ValDisplay(props.stat.view_count_new_short) + ' /10 + ' + ValDisplay(props.stat.view_count_old_video) + ' + ' + ValDisplay(props.stat.view_count_old_short) + ' /10'
+
+    return val;
+})
+
+
 const likeShare = computed(() => {
     var val = Math.round((props.stat.like_count / props.stat.view_count * 100 * 10)) / 10
     return val.toFixed(1);
 })
+
+const clickbaitShare = computed(() => {
+    var val = Math.round((props.stat.video_clickbaits / props.stat.videos * 100))
+    return val;
+})
+
 
 function formatTime(seconds) {
     const hours = Math.floor(seconds / 3600);
@@ -41,13 +55,17 @@ function formatTime(seconds) {
 
 <template>
     <div class="flex flex-auto space-x-1 items-center">
-        <div title="Взвешенные просмотры (клипы с коэф. 0.1)">👁{{ ValDisplay(stat.score) }}</div>
+        <div :title="scoreTitle">👁{{ ValDisplay(stat.score) }}</div>
         <div v-if="stat.score_change">
             (<value-change :value="stat.score_change" />)
         </div>
         <div title="Отноешние Лайки/Просмотры">👍{{ likeShare }}%</div>
+        <div v-if="stat.video_clickbaits" title="Доля кликбейтных названий">⚠️{{ clickbaitShare }}%</div>
         <!-- <div title="Комментарии" v-if="stat.comment_count">🗨{{ ValDisplay(stat.comment_count) }}M</div> -->
         <div title="Подписчики" v-if="stat.subscriber_count">👤{{ ValDisplay(stat.subscriber_count) }}</div>
+        <div v-if="stat.subscriber_count_change">
+            (<value-change :value="stat.subscriber_count_change" />)
+        </div>
         <div title="Количество новых видео за месяц" v-if="stat.videos" class="flex items-center"><img class="h-3 mr-1"
                 src="/img/video.svg" alt="videos"> {{ stat.videos }}
         </div>

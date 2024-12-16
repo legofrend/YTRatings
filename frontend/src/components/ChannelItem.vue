@@ -19,8 +19,8 @@ function channelThumbnail(ch) {
 
 </script>
 <template>
-    <div
-        class="grid grid-cols-[80px_60px_1fr] lg:grid-cols-[80px_60px_2fr_1fr] gap-1 hover:bg-gray-200 my-1 border border-blue-300 rounded shadow">
+    <div class="grid grid-cols-[80px_60px_1fr]  gap-1 hover:bg-gray-200 my-1 border border-blue-300 rounded shadow">
+        <!-- class="grid grid-cols-[80px_60px_1fr] lg:grid-cols-[80px_60px_2fr_1fr] gap-1 hover:bg-gray-200 my-1 border border-blue-300 rounded shadow"> -->
         <!-- 1 коллонка: Место -->
         <div class="col-span-1 flex flex-nowrap space-x-2  items-center">
             <!-- <div class="text-l flex flex-nowrap space-x-2 items-center"> -->
@@ -66,9 +66,9 @@ function channelThumbnail(ch) {
             </div>
         </div>
         <!-- 4 Horizontal Bars -->
-        <div class="col-span-1">
+        <!-- <div class="col-span-1">
             <bar-block :stat="item.stat" :scale="props.scale" />
-        </div>
+        </div> -->
     </div>
 
 

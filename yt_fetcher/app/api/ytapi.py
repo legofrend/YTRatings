@@ -64,6 +64,7 @@ def search_list(
         "part": "snippet",
         "type": type,
         "maxResults": min(max_result, 50),
+        "relevanceLanguage": "en",  # en ru
     }
     if published:
         after, before = published

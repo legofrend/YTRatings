@@ -33,6 +33,7 @@ services:
 volumes:
   o2t4_postgresdata:
     name: backend_o2t4_postgresdata
+    external: true
 
 networks:
   o2t4_network:

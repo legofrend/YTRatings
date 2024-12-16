@@ -177,17 +177,21 @@ def render_info_pic(
         draw_value(draw, (347, 668), "tl", 24, channel.stat.score_change, True)
 
     draw_value(draw, (260, 705), "tl", 24, channel.stat.subscriber_count)
-    # if channel.stat.subscriber_count_change:
-    #     draw_value(draw, (347, 705), "tl", 24, channel.stat.score_change, True)
+    if channel.stat.subscriber_count_change:
+        draw_value(
+            draw, (347, 705), "tl", 24, channel.stat.subscriber_count_change, True
+        )
+
     video_count = channel.stat.videos - channel.stat.shorts
     draw_value(draw, (260, 740), "tl", 24, video_count)
     draw_value(draw, (380, 740), "tl", 24, channel.stat.shorts)
 
-    video_title = split_text(channel.top_videos[0].title, 40)
-    # draw_value(draw, (100 + 387 // 2, 824 + 80 // 2), "cc", 12, video_title)
-    draw_value(draw, (100, 830), "tl", 12, video_title)
-    video_view = channel.top_videos[0].stat.view_count
-    draw_value(draw, (332, 804), "tl", 20, video_view)
+    if len(channel.top_videos) > 0:
+        video_title = split_text(channel.top_videos[0].title, 40)
+        # draw_value(draw, (100 + 387 // 2, 824 + 80 // 2), "cc", 12, video_title)
+        draw_value(draw, (100, 830), "tl", 12, video_title)
+        video_view = channel.top_videos[0].stat.view_count
+        draw_value(draw, (332, 804), "tl", 20, video_view)
 
     image.save(output_file)
     return True

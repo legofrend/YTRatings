@@ -41,13 +41,31 @@ update channel set status = null where category_id=7
 update channel set last_video_fetch_dt = '2024-12-01'::date where
                                                                  status > 0 and category_id=7 ;
 -- last_video_fetch_dt is null and
+
+update channel set thumbnail_url ='https://yt3.googleusercontent.com/uDEC9GEMIGxAKrbbAigGp-pDtQmF8qOS9rhz4M7Zm678OLYC9gaRO_MvRCc3DcF9y3Cf8pgs-HE=s160-c-k-c0x00ffffff-no-rj'
+where thumbnail_url ='https://yt3.ggpht.com/FEtvBOJPDxT-1SHz5cKW2C84nwSgVHH2jsPnT8msdPmYrlUfks7i8NXLfXkknclkMs3mb64t=s240-c-k-c0x00ffffff-no-rj'
+
+SELECT report_period,
+       data->8->>'thumbnail_url' AS thumbnail_url
+FROM report
+WHERE category_id=7 and report_period='2024-10-01'
+;
+
+UPDATE report
+SET data = jsonb_set(
+    data,
+    '{8,thumbnail_url}',
+    '"https://yt3.googleusercontent.com/YQ9NOvTsDqk54vUbTbZMGyoJIz9KypGeabdVf9xJpw2dDQP4d_Nb3S915KK_Tnp5o_6iA5bh=s160-c-k-c0x00ffffff-no-rj"'::jsonb
+)
+WHERE category_id=7 and report_period='2024-10-01';
+
 -------------------------------------------------------------
 
 select * from channel_period_top_videos limit 3;
 
-select * from report where category_id = 6 and report_period='2024-10-01';
+select * from report where category_id = 1 and report_period='2024-11-01';
 
-select * from report_view where category_id > 0 and report_period='2024-11-01'
+select * from report_view where category_id = 1 and report_period='2024-11-01'
 -- and channel_id = 'UCFkngbKHD8Qd9XxGrgpF59Q'
 
 select c2.id, c2.name, rv.rank, c.id, c.channel_id, c.channel_title, c.custom_url, last_video_fetch_dt
@@ -56,6 +74,44 @@ left join report_view rv on c.channel_id = rv.channel_id and rv.report_period = 
 left join category c2 on c.category_id = c2.id
 where c.status > 0
 order by 1, 2, 3
+
+
+-- checking report
+select vs.published_period, v.video_id, v.title,vs.cur_vs_id, vs.prev_vs_id, vs.is_new, vs.view_count, vs.cur_view_count, vs.prev_view_count
+from video_stat_change as vs
+left join video v on vs.video_id = v.video_id
+where report_period='2024-11-01' and vs.channel_id='UCVPYbobPRzz0SjinWekjUBw'
+
+select * from video_stat where video_id='20vH916rm-U'
+
+-- checking duplicates for report_period and video_id in video_stat
+select * from video_stat
+where report_period='2024-11-01' and video_id in (select vs.video_id
+from video_stat as vs
+where vs.report_period='2024-11-01'
+group by 1
+having count(*)>1
+)
+order by report_period, video_id, data_at
+
+-- !!! didn't work properly last time
+-- delete from video_stat where video_id in (select vs.video_id
+-- from video_stat as vs
+-- where vs.report_period='2024-11-01'
+-- group by 1
+-- having count(*)>1
+-- )
+-- and data_at >='01.12.24 0:12:00' and report_period='2024-11-01'
+
+select report_period, c.category_id, v.channel_id, vs.video_id,   count(*)
+from video_stat as vs
+left join video v on vs.video_id = v.video_id
+left join channel as c on c.channel_id = v.channel_id
+group by 1, 2, 3, 4
+having count(*)>1
+order by 1, 2
+
+
 
 select category_id, c.name, count(*)
 from channel
@@ -182,7 +238,7 @@ select published_at_period, category_id,
        sum(case when v.is_clickbait is False then 1 else 0 end) as cb_False
 from video as v
 left join channel as c on c.channel_id = v.channel_id
-where   published_at_period >= '2024-10-01'
+where   published_at_period >= '2024-11-01'
 and v.is_short = False
 
 group by 1, 2

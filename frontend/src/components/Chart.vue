@@ -11,11 +11,11 @@ const showNumber = ref(10)
 
 <template>
     <div>
-        <header
-            class="grid grid-cols-[60px_40px_1fr] lg:grid-cols-[60px_40px_2fr_1fr] gap-1 text-xl border-b-2 border-black space-x-6">
+        <header class="grid grid-cols-[60px_40px_1fr]  gap-1 text-xl border-b-2 border-black space-x-6">
+            <!-- class="grid grid-cols-[60px_40px_1fr] lg:grid-cols-[60px_40px_2fr_1fr] gap-1 text-xl border-b-2 border-black space-x-6"> -->
             <div class="col-span-1">Место</div>
             <div class="col-span-2 flex justify-between"><span>Канал</span><span>Метрики</span></div>
-            <div class="hidden lg:block col-span-1">Диаграмма</div>
+            <!-- <div class="hidden lg:block col-span-1">Диаграмма</div> -->
         </header>
 
         <main>

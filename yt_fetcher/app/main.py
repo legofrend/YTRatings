@@ -17,36 +17,27 @@ from app.channel import ChannelDAO, ChannelStatDAO, VideoDAO, VideoStatDAO
 # 5	Авто
 # 6	Кино
 # 7	Нейросети
-
-# Игры и гейминг
-# Лайфстайл и влоги
-# Здоровье и фитнес
-# Научно-популярные каналы
-# Финансовая грамотность и инвестиции
-# Кулинария и рецепты
-# Путешествия и туризм
-# Технологии и гаджеты
-# Красота и мода
-# Образование и саморазвитие
+# 8 AI Eng
 
 
 async def actions():
-    category_id = 1
+    category_id = 8
     period = Period(11)
     per_range = [date(2024, 11, 27), date(2024, 12, 1)]
 
     start_dt = datetime.now()
     print("Start", start_dt)
 
-    # await ChannelDAO.search_by_keywords(
-    #     "нейросети",
-    #     iterations=1,
-    #     date_step=300,
-    #     type="channel",
-    #     max_result=150,
-    # )
+    await ChannelDAO.search_by_keywords(
+        "AI news|News and reviews of neural networks",
+        iterations=8,
+        date_step=7,
+        type="video",
+        max_result=50,
+        # order="viewCount",
+    )
 
-    names = "".split(" ")  #
+    names = "@LesnarAI".split(" ")  #
 
     # ch_ids = await ChannelDAO.add_channels(names, category_id=category_id)
     # for name in names:
@@ -69,18 +60,16 @@ async def actions():
 
     # await VideoStatDAO.update_stat(report_period=period, category_id=None)
 
-    for category_id in (1, 5, 6, 7):
-        await ReportDAO.build(period, category_id)
+    # await VideoDAO.eval_clickbait({"published_at_period": period})
 
-    # for category_id in [1, 5]:
+    # for category_id in (1, 5, 6, 7):
     #     await ReportDAO.build(period, category_id)
 
-    # tmpl_path = "../video_gen/2024-10/Политика/tmpl.png"
-    # await ReportDAO.generate_info_images(
-    #     tmpl_path, period, category_id, top_channels=20, top_videos_count=0
-    # )
-
-    # await VideoDAO.eval_clickbait({"published_at_period": period})
+    # tmpl_path = "../video_gen/2024-11/Нейросети/tmpl.png"
+    # for category_id in (1, 5, 6, 7):
+    #     await ReportDAO.generate_info_images(
+    #         period, category_id, top_channels=20, top_videos_count=0
+    #     )
 
     print("Finish after ", datetime.now() - start_dt)
 
