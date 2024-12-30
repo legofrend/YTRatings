@@ -19,8 +19,8 @@ const sortTypes = [
   { id: 'rank', name: 'Место' },
   { id: 'subscriber_count', name: 'Подписчики' },
 ]
-// selectedSort.value = 'rank'
-selectedSort.value = 'subscriber_count'
+selectedSort.value = 'rank'
+// selectedSort.value = 'subscriber_count'
 
 
 const currentPeriod = computed(() => {
