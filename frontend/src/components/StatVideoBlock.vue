@@ -1,7 +1,5 @@
 <script setup>
 import { computed } from 'vue';
-import ValueChange from './UI/ValueChange.vue';
-import dataBlock from './UI/dataBlock.vue';
 
 const props = defineProps(['stat'])
 // console.log(props.stat)
@@ -64,22 +62,23 @@ function formatTime(seconds, full = false) {
 </script>
 
 <template>
-    <div class="flex flex-auto space-x-1 md:space-x-2 items-baseline text-sm">
-        <data-block type="views" :value="ValDisplay(stat.score)" :value-change="stat.score_change"
-            :title="scoreTitle"></data-block>
-        <data-block type="subscribers" :value="ValDisplay(stat.subscriber_count)"
-            :value-change="stat.subscriber_count_change" title="Подписчики"></data-block>
-        <data-block type="likes" :value="likeShare + '%'" title="Отношение Лайки/Просмотры"></data-block>
-        <data-block type="comments" :value="commentShare + '%'"
-            title="Отношение количества комментариев к просмотрам"></data-block>
-        <data-block type="clickbaits" :value="clickbaitShare + '%'" title="Доля кликбейтных названий"></data-block>
-        <data-block type="videos" :value="stat.videos" title="Количество новых видео за месяц"></data-block>
-        <data-block type="shorts" :value="stat.shorts" title="Количество новых клипов за месяц"></data-block>
-        <data-block class="hidden md:flex" type="time" :value="formatTime(stat.duration)"
-            title="Длительность"></data-block>
+    <div class="flex  space-x-2 text-xs">
 
-        <!-- <div title="Комментарии" v-if="stat.comment_count">🗨{{ ValDisplay(stat.comment_count) }}M</div> -->
-
+        <div class="flex px-1 items-center">
+            <img src="/img/iconView.svg" class="h-3  mr-1" alt="">
+            <div>{{ ValDisplay(stat.view_count) }}</div>
+        </div>
+        <div class="flex px-1  items-center">
+            <img src="/img/iconLike.svg" class="h-3  mr-1" alt="">
+            <div>{{ likeShare + '%' }}</div>
+        </div>
+        <div class="flex px-1 items-center">
+            <img src="/img/iconComment.svg" class="h-3 mr-1" alt="">
+            <div>{{ commentShare + '%' }}</div>
+        </div>
+        <div class="flex px-1 items-center bg-black text-white rounded-md">
+            <div>{{ formatTime(stat.duration, true) }}</div>
+        </div>
 
     </div>
 

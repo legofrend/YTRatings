@@ -14,8 +14,22 @@ SELECT setval('category_id_seq', (SELECT MAX(id) FROM category) + 1);
 update video set published_at_period = date_trunc('month', published_at)::date where published_at_period is null;
 
 -- update duration and video urls
-update video set is_short = case when duration > 65 then 0 else null end
-where video.is_short > -1;
+update video set is_short = case
+    when duration > 65 then 0::boolean
+    when is_short is TRUE then 1::boolean
+    else null end
+where id in
+      (select v.id
+       from video as v
+       left join channel as c on c.channel_id = v.channel_id and c.category_id in (4, 11)
+       )
+--     video.is_short > -1;
+
+select count(v.*)
+from video as v
+left join channel as c on c.channel_id = v.channel_id and c.category_id in (4, 11)
+where v.is_short is null
+
 
 update video set
  video_url =
@@ -33,10 +47,11 @@ WHERE channel_id IN (
     SELECT c.channel_id
     FROM channel AS c
     LEFT JOIN channel_stat cs ON c.channel_id = cs.channel_id
-    WHERE c.category_id = 7 AND cs.subscriber_count < 1000 and c.status is null
+    WHERE c.category_id = 12 AND cs.subscriber_count <200000 and c.status=1 and c.id not in (1021, 1109, 1123, 1119, 1126, 1095, 1097, 1132, 1127)
 );
 
-update channel set status = null where category_id=7
+update channel set category_id=12 where category_id is null
+update channel set status = 1 where category_id in (4, 11, 12)
 
 update channel set last_video_fetch_dt = '2024-12-01'::date where
                                                                  status > 0 and category_id=7 ;
@@ -63,14 +78,17 @@ WHERE category_id=7 and report_period='2024-10-01';
 
 select * from channel_period_top_videos limit 3;
 
-select * from report where category_id = 1 and report_period='2024-11-01';
+select * from report where category_id = 7 and report_period='2024-11-01';
 
-select * from report_view where category_id = 1 and report_period='2024-11-01'
+select        rank, channel_id, channel_title,
+       ('https://www.youtube.com/' || custom_url) as url,
+       description, subscriber_count, view_count
+from report_view where category_id = 7 and report_period='2024-11-01'
 -- and channel_id = 'UCFkngbKHD8Qd9XxGrgpF59Q'
 
 select c2.id, c2.name, rv.rank, c.id, c.channel_id, c.channel_title, c.custom_url, last_video_fetch_dt
 from channel as c
-left join report_view rv on c.channel_id = rv.channel_id and rv.report_period = '2024-10-01'
+left join report_view rv on c.channel_id = rv.channel_id and rv.report_period = '2024-11-01'
 left join category c2 on c.category_id = c2.id
 where c.status > 0
 order by 1, 2, 3
@@ -122,9 +140,10 @@ order by 1
 
 -- info about channel merged with stat and info about videos in the period
 select
+    c.category_id,
     c.id,
     c.channel_id,
-    c.custom_url,
+    ('https://www.youtube.com/' || c.custom_url) as url,
     c.channel_title,
     c.description,
     cs.report_period,
@@ -138,13 +157,16 @@ from channel as c
 left join channel_stat cs on c.channel_id = cs.channel_id
 left join video v on c.channel_id = v.channel_id
 left join video_stat vs on v.video_id = vs.video_id and vs.report_period = cs.report_period
-where c.category_id>=0 and c.status = 1
+where c.category_id in (7) and c.status = 1
+and cs.report_period='2024-11-01'
 -- and c.id>=390
 --     and c.channel_id = 'UC8bw1lINePKw5dBhseYWrdQ'
-group by 1,2,3,4,5,6,7,8, 9, 10
+group by 1,2,3,4,5,6,7,8, 9, 10, 11
 -- order by cs.subscriber_count desc ;
-order by c.id desc
-limit 10;
+order by c.category_id, cs.subscriber_count desc
+limit 1000;
+
+update channel set status=0 where id in (862, 818, 817, 840, 849, 908, 917, 941, 915, 910, 957, 943, 899, 988)
 
 -- report with category name
 select c.id, c.name, r.report_period
@@ -180,11 +202,12 @@ select video_id, title from channel_period_top_videos
 
 
 -- Channels in the rank order for the specific period and category
-select r.channel_id, r.channel_title
+select r.category_id, r.channel_id, r.channel_title, r.rank
 from report_view as r
-where report_period = '2024-10-01' and category_id=5;
+where report_period = '2024-11-01' and category_id in (4, 8, 11, 12)
+order by r.category_id, r.rank;
 
-update channel set status = 0 where channel_id in ()
+update channel set category_id = 0 where channel_id in ()
 
 -- Channels and videos within wo stat
 select c.channel_id, c.channel_title,

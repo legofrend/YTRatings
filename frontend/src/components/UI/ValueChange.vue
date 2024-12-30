@@ -22,11 +22,18 @@ const icon = (value) => {
     // console.log('value', value)
     // console.log('ValDisplay', val)
     return value > 0 ? '▲' + val : value < 0 ? '▼' + val : '-';
+
 }
 // ⬆⬇
 </script>
 
 <template>
-    <span :class="value > 0 ? 'text-green-500' : value < 0 ? 'text-red-500' : 'text-gray-500'">
-        {{ icon(props.value) }}</span>
+    <span v-if="value > 0" class="text-green-500">▲</span>
+    <span v-else-if="value < 0" class="text-red-500">▼</span>
+    <span v-else class="text-gray-500">-</span>
+    <span v-if="value != 0"> {{ ValDisplay(props.value) }}</span>
+
+
+    <!-- <span :class="value > 0 ? 'text-green-500' : value < 0 ? 'text-red-500' : 'text-gray-500'">
+        {{ icon(props.value) }}</span> -->
 </template>

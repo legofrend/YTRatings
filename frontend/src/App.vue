@@ -9,10 +9,18 @@ import FeedbackForm from './components/FeedbackForm.vue';
 
 const metaData = ref([]);
 const data = ref([]);
+const selectedSort = ref(Object);
 const loading = ref(true);
 const error = ref(null);
 const currentCategory = ref(Object);
 const currentPeriodIndex = ref(0)
+
+const sortTypes = [
+  { id: 'rank', name: 'Место' },
+  { id: 'subscriber_count', name: 'Подписчики' },
+]
+// selectedSort.value = 'rank'
+selectedSort.value = 'subscriber_count'
 
 
 const currentPeriod = computed(() => {
@@ -26,6 +34,8 @@ const currentCategoryId = computed(() => {
 const periodDisplay = computed(() => {
   return formattedDate(currentPeriod.value)
 })
+
+
 
 function formattedDate(dateStr) {
   const dateObject = new Date(dateStr);
@@ -118,23 +128,34 @@ watch(
   // { deep: true }
 )
 
+function parseUrl() {
+  const url = window.location.href; // Получаем полный URL
+  const regex = /\/(\d+)\/([\d]{4}-[\d]{2}-[\d]{2})$/; // Регулярное выражение для парсинга
+
+  const matches = url.match(regex);
+  if (matches) {
+    this.categoryId = parseInt(matches[1], 10); // Присваиваем categoryId
+    this.period = matches[2]; // Присваиваем period
+  }
+}
+
 async function initialize() {
   loading.value = true;
 
   // Взять параметры из адресной строки
   const urlParams = new URLSearchParams(window.location.search);
   const paramValue = urlParams.get('category_id');
-  console.log(paramValue);
+  // console.log('url param category_id=', paramValue);
+
+  const localCurrentCategoryId = localStorage.getItem('currentCategoryId');
+  const categoryId = paramValue ? Number(paramValue) : (localCurrentCategoryId ? Number(localCurrentCategoryId) : 1);
 
   await fetchMetaData();
-  const localCurrentCategoryId = localStorage.getItem('currentCategoryId');
-  const categoryId = localCurrentCategoryId ? Number(localCurrentCategoryId) : 1;
-
-  console.log('metaData', metaData.value);
-  console.log('currentCategory', currentCategory.value);
+  // console.log('metaData', metaData.value);
+  // console.log('currentCategory', currentCategory.value);
 
   currentCategory.value = metaData.value.find(cat => cat.id === categoryId);
-  console.log('Category', currentCategory.value);
+  // console.log('Category', currentCategory.value);
   if (currentCategory.value) {
     currentPeriodIndex.value = currentCategory.value.periods.length - 1
     // const period = category.periods[currentPeriodIndex.value];
@@ -169,38 +190,57 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class=" mx-5 ">
-    <h1 class="flex items-center justify-center gap-3 text-4xl m-3 ">Рейтинг <img class="h-8"
-        src="/img/youtube_logo.svg" alt="">
-      каналов</h1>
+  <div class="mx-auto px-2 max-w-screen-lg">
+    <h1 class="flex flex-wrap items-center justify-center gap-2 text-xl md:text-4xl my-3 ">Рейтинг
+      <img class="h-6 md:h-8" src="/img/youtube_logo_black.svg" alt="">
+      каналов
+    </h1>
     <p v-if="loading">Loading...</p>
     <p v-else-if="error">{{ error }}</p>
     <div v-else>
 
       <!-- Navigation -->
-      <div class="flex justify-left border rounded shadow select-none">
+      <!-- Category -->
+      <div class="flex flex-col md:flex-row justify-center items-center shadow select-none gap-1 md:gap-5">
         <select v-model="currentCategoryId" @change="changeCategory($event.target.value)" name="category"
-          class="text-center text-base m-3 cursor-pointer">
-          <option v-for="category in metaData" :key="category.id" :value="category.id">{{ category.name }}
+          class="pl-1   text-black text-base  cursor-pointer rounded">
+          <option class=" text-left" v-for="category in metaData" :key="category.id" :value="category.id">{{
+            category.name }}
           </option>
         </select>
 
-        <div class="flex justify-center items-center select-none">
-          <img src="/img/arrowLeft.svg" class="h-4 mx-1 cursor-pointer" @click="changePeriod(-1)" />
+        <!-- Period -->
+        <div class="flex justify-center items-center select-none gap-1">
+          <img src="/img/arrowLeftWhite.svg" class="h-4 mx-1 cursor-pointer" @click="changePeriod(-1)" />
+          <h3 class="text-center text-base">{{ periodDisplay }}</h3>
+          <img src="/img/arrowLeftWhite.svg" class="h-4 mx-1 cursor-pointer rotate-180" @click="changePeriod(1)" />
+        </div>
 
-          <h3 class="text-center text-base m-3">{{ periodDisplay }}</h3>
-          <img src="/img/arrowLeft.svg" class="h-4 mx-1 cursor-pointer rotate-180" @click="changePeriod(1)" />
+        <!-- Sort order -->
+        <div class="flex flex-row items-center gap-1">
+          <div class="bg-white rounded-lg h-5 w-7 items-center flex justify-center">
+            <img src="/img/sortBtn.svg" class="h-4" />
+          </div>
+          <div>
+            <select v-model="selectedSort" @change="selectedSort = $event.target.value" name="sort"
+              class=" text-black  cursor-pointer rounded">
+              <option class=" text-left" v-for="sort in sortTypes" :key="sort.id" :value="sort.id">{{
+                sort.name }}
+              </option>
+            </select>
+
+          </div>
         </div>
       </div>
 
-      <h2 class="text-center text-3xl m-3">{{ data.category.title }}</h2>
+      <!-- Category title -->
+      <h2 class="text-center text-xl md:text-3xl my-3">{{ data.category.title }}</h2>
 
       <!-- Chart -->
-      <Chart :data="data" />
+      <Chart :data="data" :selected-sort="selectedSort" />
+
       <info-block header="Методика" class="text-xs  mt-10">Рейтинг на основе суммы просмотров на канале по видео и
-        клипам
-        двух
-        последних месяцев. Клипы (shorts) учитываются с коэффициентом 1/10. <p>Критерии выбора каналов: {{
+        клипам двух последних месяцев. Клипы (shorts) учитываются с коэффициентом 1/10. <p>Критерии выбора каналов: {{
           data.category.description }}</p>
 
       </info-block>

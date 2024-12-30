@@ -69,16 +69,19 @@ class VideoDAO(BaseDAO):
         return data
 
     @classmethod
-    async def update_is_short(
-        cls, video_ids: list[str] | str = None, do_nothing: bool = False
-    ):
-        if not video_ids:
-            res = await cls.find_all(is_short=None)
-            video_ids = [item["video_id"] for item in res]
+    async def update_is_short(cls):
+        res = await cls.find_all(is_short=None)
+        if not res:
+            return None
+        data = [dict(video_id=item.video_id, is_short=item.is_short) for item in res]
 
-        data = yt.check_shorts(video_ids)
-        if data:
-            await cls.add_update_bulk(data, do_nothing=do_nothing)
+        try:
+            await yt.check_shorts(data)
+            await cls.update_bulk(data)
+        except:
+            logger.error("Can't update video detail", exc_info=True)
+            save_errors(data, "video_detail")
+
         return data
 
     @classmethod
