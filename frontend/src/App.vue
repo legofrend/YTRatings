@@ -151,11 +151,11 @@ async function initialize() {
   const categoryId = paramValue ? Number(paramValue) : (localCurrentCategoryId ? Number(localCurrentCategoryId) : 1);
 
   await fetchMetaData();
-  // console.log('metaData', metaData.value);
+  console.log('metaData', metaData.value);
   // console.log('currentCategory', currentCategory.value);
 
   currentCategory.value = metaData.value.find(cat => cat.id === categoryId);
-  // console.log('Category', currentCategory.value);
+  console.log('Category', currentCategory.value);
   if (currentCategory.value) {
     currentPeriodIndex.value = currentCategory.value.periods.length - 1
     // const period = category.periods[currentPeriodIndex.value];

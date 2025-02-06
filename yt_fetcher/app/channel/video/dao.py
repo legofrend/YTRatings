@@ -37,6 +37,7 @@ class VideoDAO(BaseDAO):
                         left join channel as c on c.channel_id = v.channel_id
                         left join video_stat vs on v.video_id = vs.video_id and vs.report_period = '{report_period.strf()}'
                         where vs.id is null and v.published_at_period >= '{published_at_period.strf()}'
+                        and c.status=1
                     """
             if category_id:
                 query += f" and c.category_id={category_id}"
@@ -54,14 +55,16 @@ class VideoDAO(BaseDAO):
                     "duration": None,
                 }
             )
+            logger.info(f"Found videos without duration: {len(video_ids)}")
             if not video_ids:
                 return None
         try:
             data = yt.video_list(video_ids, obj_type="detail")
             if not data:
                 return None
-            await yt.check_shorts(data)
+            # await yt.check_shorts(data)
             await cls.update_bulk(data)
+            logger.info(f"Updated videos: {len(data)}")
         except:
             logger.error("Can't update video detail", exc_info=True)
             save_errors(data, "video_detail")
@@ -74,9 +77,10 @@ class VideoDAO(BaseDAO):
         if not res:
             return None
         data = [dict(video_id=item.video_id, is_short=item.is_short) for item in res]
-
+        logger.info(f"Found videos without is_short: {len(data)}")
         try:
             await yt.check_shorts(data)
+            save_errors(data, "video_is_short")
             await cls.update_bulk(data)
         except:
             logger.error("Can't update video detail", exc_info=True)
@@ -159,7 +163,7 @@ class VideoDAO(BaseDAO):
         if "is_short" not in filters.keys():
             filters["is_short"] = False
         videos = await cls.find_all(**filters)
-
+        responses = []
         for i in range(0, len(videos), LIMIT):
             data = [
                 (item["video_id"] + "\t" + item["title"])
@@ -169,8 +173,11 @@ class VideoDAO(BaseDAO):
             prompt = instructions + "\n".join(data) + "\n"
             response = oai.chat_with_gpt(prompt, is_json=True, temperature=0.5)
             if response:
-                await cls.update_bulk(response)
+                responses.extend(response)
+                # await cls.update_bulk(response)
             logger.info(f"Progress: {i+LIMIT}/{len(videos)}")
+        save_errors(responses, "clickbait")
+        await cls.update_bulk(responses)
 
 
 class VideoStatDAO(BaseDAO):

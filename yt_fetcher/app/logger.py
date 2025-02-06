@@ -38,7 +38,7 @@ def save_json_csv(data_json, filename: str):
 
 def save_errors(errors, type: str):
     filename = (
-        "logs/" + datetime.now().strftime("%Y-%m-%d-%H-%M-%S") + f"{type}_errors_.csv"
+        "logs/" + datetime.now().strftime("%Y-%m-%d-%H-%M-%S") + f"_{type}_errors_.csv"
     )
     if isinstance(errors, str):
         with open(filename, "w", encoding="utf-8") as file:
@@ -48,7 +48,7 @@ def save_errors(errors, type: str):
         save_json_csv(errors, filename)
     except Exception as e:
         with open(filename, "w", encoding="utf-8") as file:
-            file.write(errors)
+            file.write(str(errors))
     return True
 
 

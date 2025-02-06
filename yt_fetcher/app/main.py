@@ -11,19 +11,22 @@ from app.channel import ChannelDAO, ChannelStatDAO, VideoDAO, VideoStatDAO
 
 
 # Categories
-# 1	Политика
+# 1	Политика 1
 # 2	SC2
 # 3	Юмор
-# 5	Авто
-# 6	Кино
-# 7	Нейросети
-# 8 AI Eng
+# 4	Финансы 1
+# 5	Авто 1
+# 6	Кино 1
+# 7	Нейросети 1
+# 8 AI Eng 1
+# 11 Мода 1
+# 12 Игры 31
 
 
 async def actions():
-    category_id = 5
-    period = Period(12)
-    per_range = [date(2024, 12, 1), date(2024, 12, 29)]
+    category_id = 11
+    period = Period(1)
+    per_range = [date(2025, 1, 30), date(2025, 2, 1)]
 
     start_dt = datetime.now()
     print("Start", start_dt)
@@ -38,35 +41,45 @@ async def actions():
     #     # order="viewCount",
     # )
 
-    names = """@syntxai  @ZHUBAN""".split("\n")  #
+    names = """@syntxai""".split(" ")  #
+    ids = """""".split("\n")
 
     # ch_ids = await ChannelDAO.add_channels(names, category_id=category_id)
     # for name in names:
     #     await ChannelDAO.search_channel(name, category_id=category_id)
-    # await ChannelDAO.update_detail()
+    # await ChannelDAO.update_detail(channel_ids=ids)
     # await ChannelStatDAO.update_stat(
     #     report_period=period, channel_ids=ch_ids, category_id=category_id
     # )
 
     # await ChannelStatDAO.update_stat(report_period=period)
 
-    await ChannelDAO.search_new_by_category_period(
-        period=per_range, category_ids=category_id
-    )
+    # await ChannelDAO.search_new_by_category_period(
+    #     period=per_range, category_ids=category_id
+    # )
     # or
-    ids = """""".split("\n")
 
     # await VideoDAO.search_new_by_channel_period(period=per_range, channel_ids=ids)
     # await VideoDAO.update_detail()
-    # await upload_from_file()
+    # await upload_from_json_file()
+
     # await VideoDAO.update_is_short()
 
     # await VideoStatDAO.update_stat(report_period=period, category_id=None)
-
+    # for i in range(3):
     # await VideoDAO.eval_clickbait({"published_at_period": period})
 
-    # for category_id in (4, 8, 11, 12):
-    #     await ReportDAO.build(period, category_id)
+    # for i in (1,):
+    #     # for category_id in (4, 5, 6, 7, 8, 11, 12):
+    #     for category_id in (1,):
+    #         await ReportDAO.build(Period(i, 2025), category_id)
+
+    errors = []
+    for category_id in (4, 5, 6, 7, 8, 11, 12):
+        err = await ChannelDAO.save_thumbnails(filters={"category_id": category_id})
+        errors.extend(err)
+    print(f"Errors: {len(errors)}")
+    await ChannelDAO.update_detail(channel_ids=errors)
 
     # tmpl_path = "../video_gen/2024-11/Нейросети/tmpl.png"
     # for category_id in (1, 5, 6, 7):
@@ -79,7 +92,7 @@ async def actions():
     return True
 
 
-async def upload_from_file():
+async def upload_from_csv_file():
     import csv
 
     csv_file_path = "logs/2024-12-21-14-01-08video_detail_errors_.csv"
@@ -114,6 +127,20 @@ async def upload_from_file():
     print(len(njson_data))
 
     res = await VideoDAO.update_bulk(njson_data)
+
+
+async def upload_from_json_file():
+    import json
+
+    csv_file_path = "logs/2025-02-01-21-59-44_video_errors_.csv"
+
+    # Чтение CSV и преобразование в JSON
+    with open(csv_file_path, mode="r", encoding="utf-8") as file:
+        json_data = json.load(file)
+
+    print(len(json_data))
+
+    res = await VideoDAO.update_bulk(json_data)
 
 
 def main():

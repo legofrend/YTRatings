@@ -249,3 +249,25 @@ def gen_script(data: list[SChannel], tmpl_file: str, output_file: str):
 #                 downloaded += 1
 
 #     return downloaded
+
+
+def save_thumbnails(channels: list[SChannel], output_dir: str = None):
+
+    output_dir = (
+        output_dir
+        or r"C:\Users\eremi\Documents\4. Projects\2024-07 YTRatings\frontend\public\channel_logo"
+    )
+    os.makedirs(output_dir, exist_ok=True)
+    errors = []
+    for channel in channels:
+        logo_file = channel.custom_url or channel.channel_id
+        logo_file = os.path.join(output_dir, logo_file + ".jpg")
+        if not os.path.exists(logo_file):
+            if not download_file(channel.thumbnail_url, logo_file):
+                logger.debug(
+                    f"Can't download logo for channel {channel.custom_url}: {channel.thumbnail_url}"
+                )
+                errors.append(channel.channel_id)
+    # if errors:
+    #     logger.error(f"Can't download {len(errors)} thumbnails")
+    return errors

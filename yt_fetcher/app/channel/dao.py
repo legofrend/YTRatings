@@ -109,14 +109,24 @@ class ChannelDAO(BaseDAO):
 
     @classmethod
     async def update_detail(
-        cls, channel_ids: list[str] | str = None, do_nothing: bool = False
+        cls,
+        channel_ids: list[str] | str = None,
+        category_id: int = None,
+        do_nothing: bool = False,
     ):
         if not channel_ids:
-            channel_ids = await cls.get_ids(
-                filters={
+            if category_id:
+                filters = {
+                    "category_id": category_id,
+                    "status": 1,
+                }
+            else:
+                filters = {
                     "published_at": None,
                 }
-            )
+
+            channel_ids = await cls.get_ids(filters=filters)
+
         data = yt.channel_list(channel_ids, obj_type="detail")
         if data:
             await cls.add_update_bulk(data, do_nothing=do_nothing)
@@ -181,6 +191,15 @@ class ChannelDAO(BaseDAO):
             )
 
         return True
+
+    @classmethod
+    async def save_thumbnails(cls, filters: dict = {}):
+        from app.report.tools import save_thumbnails
+
+        if "status" not in filters.keys():
+            filters["status"] = 1
+        channels = await cls.find_all(**filters)
+        return save_thumbnails(channels)
 
 
 class ChannelStatDAO(BaseDAO):
