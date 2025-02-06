@@ -19,8 +19,9 @@ const ValDisplay = (value) => {
 }
 
 const scoreTitle = computed(() => {
-    var val = ValDisplay(props.stat.score) + ' = ' + ValDisplay(props.stat.view_count_new_video) + ' + '
-        + ValDisplay(props.stat.view_count_new_short) + ' /10 + ' + ValDisplay(props.stat.view_count_old_video) + ' + ' + ValDisplay(props.stat.view_count_old_short) + ' /10'
+    var val = 'Индекс: ' + ValDisplay(props.stat.score) + ' = ' + ValDisplay(props.stat.view_count_new_video) + ' + '
+        + ValDisplay(props.stat.view_count_new_short) + ' /10 + ' + ValDisplay(props.stat.view_count_old_video) + ' + ' + ValDisplay(props.stat.view_count_old_short) + ' /10' + '\n'
+        + 'в среднем на 1 видео: ' + ValDisplay(Math.round(props.stat.view_count_new_video / props.stat.videos))
 
     return val;
 })

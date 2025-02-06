@@ -10,7 +10,21 @@ const props = defineProps(['item', 'scale'])
 const showDetails = ref(false);
 
 function channelThumbnail(ch) {
-    return ch.thumbnail_url ? ch.thumbnail_url : ('img/' + ch.channel_id + '.jpg')
+    return ('channel_logo/' + ch.custom_url + '.jpg')
+    // return ch.thumbnail_url ? ch.thumbnail_url : ('img/' + ch.channel_id + '.jpg')
+}
+
+async function checkImage() {
+    try {
+        const response = await fetch(this.targetImage, { method: "HEAD" });
+        if (response.ok) {
+            this.imagePath = this.targetImage;
+        } else {
+            this.imagePath = this.defaultImage;
+        }
+    } catch (error) {
+        this.imagePath = this.defaultImage;
+    }
 }
 
 // console.log(props.item)
@@ -39,8 +53,9 @@ function channelThumbnail(ch) {
             </div>
 
             <!-- Channel logo -->
-            <img class="h-10 md:h-16 rounded-sm border border-gray-300" :src="channelThumbnail(item)"
-                :alt="item.channel_title" />
+            <img class="h-10 w-10 md:h-16 md:w-16 rounded-sm border border-gray-300" :src="channelThumbnail(item)"
+                :alt="item.channel_title"
+                :title="item.channel_title + '\n' + item.custom_url + '\n' + item.channel_id" />
 
             <div class="flex justify-between flex-col md:flex-row w-full">
                 <!-- Channel title -->
