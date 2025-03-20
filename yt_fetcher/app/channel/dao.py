@@ -123,6 +123,7 @@ class ChannelDAO(BaseDAO):
             else:
                 filters = {
                     "published_at": None,
+                    "status": 1,
                 }
 
             channel_ids = await cls.get_ids(filters=filters)

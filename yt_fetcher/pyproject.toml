@@ -29,6 +29,7 @@ pandas = "^2.2.2"
 jupyter = "^1.1.1"
 beautifulsoup4 = "^4.12.3"
 bs4 = "^0.0.2"
+selenium = "^4.29.0"
 
 [build-system]
 requires = ["poetry-core"]

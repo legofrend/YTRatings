@@ -20,13 +20,13 @@ from app.channel import ChannelDAO, ChannelStatDAO, VideoDAO, VideoStatDAO
 # 7	Нейросети 1
 # 8 AI Eng 1
 # 11 Мода 1
-# 12 Игры 31
+# 12 Игры 1
 
 
 async def actions():
     category_id = 11
-    period = Period(1)
-    per_range = [date(2025, 1, 30), date(2025, 2, 1)]
+    period = Period(3)
+    per_range = [date(2025, 3, 1), date(2025, 3, 19)]
 
     start_dt = datetime.now()
     print("Start", start_dt)
@@ -41,13 +41,13 @@ async def actions():
     #     # order="viewCount",
     # )
 
-    names = """@syntxai""".split(" ")  #
+    names = """@syntxai @ai-iiru""".split(" ")  #
     ids = """""".split("\n")
 
     # ch_ids = await ChannelDAO.add_channels(names, category_id=category_id)
     # for name in names:
     #     await ChannelDAO.search_channel(name, category_id=category_id)
-    # await ChannelDAO.update_detail(channel_ids=ids)
+    # await ChannelDAO.update_detail()
     # await ChannelStatDAO.update_stat(
     #     report_period=period, channel_ids=ch_ids, category_id=category_id
     # )
@@ -70,12 +70,12 @@ async def actions():
     # await VideoDAO.eval_clickbait({"published_at_period": period})
 
     # for i in (1,):
-    #     # for category_id in (4, 5, 6, 7, 8, 11, 12):
-    #     for category_id in (1,):
-    #         await ReportDAO.build(Period(i, 2025), category_id)
+    # for category_id in (1, 4, 5, 6, 7, 8, 11, 12):
+    # await ReportDAO.build(period, category_id)
 
     errors = []
-    for category_id in (4, 5, 6, 7, 8, 11, 12):
+    for category_id in range(13, 19):
+        print(f"Category {category_id}")
         err = await ChannelDAO.save_thumbnails(filters={"category_id": category_id})
         errors.extend(err)
     print(f"Errors: {len(errors)}")

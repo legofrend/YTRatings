@@ -7,8 +7,10 @@ alter table channel  add last_video_fetch_dt timestamp default Null;
 TRUNCATE TABLE report RESTART IDENTITY;
 
 -- reset id key
-SELECT pg_get_serial_sequence('video_stat', 'id');
+SELECT pg_get_serial_sequence('channel_stat', 'id');
 SELECT setval('category_id_seq', (SELECT MAX(id) FROM category) + 1);
+SELECT setval('channel_stat_id_seq', (SELECT MAX(id) FROM channel_stat) + 1);
+
 
 -- set published period for videos
 update video set published_at_period = date_trunc('month', published_at)::date where published_at_period is null;
@@ -247,11 +249,12 @@ order by v.published_at
 -- Get channels without videos for the period
 select c.category_id, c.id, c.channel_id, c.channel_title, count(v.id)
 from channel as c
-left join video v on v.channel_id = c.channel_id and v.published_at_period = '2024-12-01'
-where c.status=1 and c.category_id > 0
+left join video v on v.channel_id = c.channel_id and v.published_at_period = '2025-02-01'
+where c.status=1 and c.category_id = 6
 --   and v.video_id is null
 --     and c.channel_id='UCFkngbKHD8Qd9XxGrgpF59Q'
 group by 1,2,3, 4
+having count(v.id)=0
 order by 1, 2
 
 select published_at_period, video_id, title, is_clickbait, clickbait_comment
@@ -295,8 +298,8 @@ where v.is_short=False and v.is_clickbait is null and published_at_period='2025-
 
 select count(*)
 from video as v
-where v.is_short is null
--- where v.duration is null
+-- where v.is_short is null
+where v.duration is null
 
 
 -- status on category level
@@ -313,3 +316,45 @@ left join category c on c.id = ch.category_id
 where ch.status=1 and v.published_at_period='2025-01-01'
 group by 1, 2
 order by 1
+
+select
+    c.id,
+    c.name,
+    count(distinct (ch.id)) as channels
+
+from channel as ch
+left join category c on c.id = ch.category_id
+where ch.status=1
+group by 1, 2
+order by 1
+
+
+SELECT column_name, data_type
+FROM information_schema.columns
+WHERE table_name = 'channel_stat';
+
+select
+    c.category,
+    csc.*
+from channel_stat_change as csc
+left join channel ch on csc.channel_id = ch.channel_id
+left join category as c on ch.category_id = c.id
+where total_view_count_change is not null
+order by csc.report_period desc, c.category, total_view_count_change desc
+limit 100
+
+
+SELECT count(t.*)
+FROM public.channel t
+WHERE published_at IS NULL and status=1
+
+delete from channel
+WHERE published_at IS NULL
+and status=1
+
+DELETE FROM channel_stat
+WHERE channel_id IN (
+    SELECT channel_id FROM channel
+    WHERE published_at IS NULL AND status = 1
+);
+

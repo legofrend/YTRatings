@@ -259,15 +259,20 @@ def save_thumbnails(channels: list[SChannel], output_dir: str = None):
     )
     os.makedirs(output_dir, exist_ok=True)
     errors = []
+    downloaded = 0
     for channel in channels:
         logo_file = channel.custom_url or channel.channel_id
         logo_file = os.path.join(output_dir, logo_file + ".jpg")
         if not os.path.exists(logo_file):
             if not download_file(channel.thumbnail_url, logo_file):
-                logger.debug(
+                logger.error(
                     f"Can't download logo for channel {channel.custom_url}: {channel.thumbnail_url}"
                 )
                 errors.append(channel.channel_id)
-    # if errors:
-    #     logger.error(f"Can't download {len(errors)} thumbnails")
+            else:
+                downloaded += 1
+
+    logger.info(f"Downloaded {downloaded} of {len(channels)} thumbnails")
+    if errors:
+        logger.error(f"Can't download {len(errors)} thumbnails")
     return errors
