@@ -35,6 +35,11 @@ class Video(Base):
     is_short: Mapped[bool | None]
     is_clickbait: Mapped[bool | None]
     clickbait_comment: Mapped[str | None]
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(), onupdate=func.now()
+    )
+    data: Mapped[dict] = mapped_column(JSONB, server_default="{}")
 
 
 class VideoStat(Base):

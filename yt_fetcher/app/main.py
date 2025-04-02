@@ -14,19 +14,19 @@ from app.channel import ChannelDAO, ChannelStatDAO, VideoDAO, VideoStatDAO
 # 1	Политика 1
 # 2	SC2
 # 3	Юмор
-# 4	Финансы 1
-# 5	Авто 1
-# 6	Кино 1
+# 4	Финансы 1 23/30
+# 5	Авто
+# 6	Кино
 # 7	Нейросети 1
 # 8 AI Eng 1
-# 11 Мода 1
-# 12 Игры 1
+# 11 Мода
+# 12 Игры
 
 
 async def actions():
-    category_id = 11
+    category_id = 4
     period = Period(3)
-    per_range = [date(2025, 3, 1), date(2025, 3, 19)]
+    per_range = [date(2025, 3, 1), date(2025, 4, 1)]
 
     start_dt = datetime.now()
     print("Start", start_dt)
@@ -41,7 +41,7 @@ async def actions():
     #     # order="viewCount",
     # )
 
-    names = """@syntxai @ai-iiru""".split(" ")  #
+    names = """""".split(" ")  #
     ids = """""".split("\n")
 
     # ch_ids = await ChannelDAO.add_channels(names, category_id=category_id)
@@ -52,11 +52,12 @@ async def actions():
     #     report_period=period, channel_ids=ch_ids, category_id=category_id
     # )
 
-    # await ChannelStatDAO.update_stat(report_period=period)
+    # res = await ChannelStatDAO.update_stat(report_period=period)
+    # print(f"Updated {len(res)} records")
 
-    # await ChannelDAO.search_new_by_category_period(
-    #     period=per_range, category_ids=category_id
-    # )
+    await ChannelDAO.search_new_by_category_period(
+        period=per_range, category_ids=category_id
+    )
     # or
 
     # await VideoDAO.search_new_by_channel_period(period=per_range, channel_ids=ids)
@@ -65,7 +66,7 @@ async def actions():
 
     # await VideoDAO.update_is_short()
 
-    # await VideoStatDAO.update_stat(report_period=period, category_id=None)
+    # await VideoStatDAO.update_stat(report_period=period, category_id=category_id)
     # for i in range(3):
     # await VideoDAO.eval_clickbait({"published_at_period": period})
 
@@ -73,13 +74,13 @@ async def actions():
     # for category_id in (1, 4, 5, 6, 7, 8, 11, 12):
     # await ReportDAO.build(period, category_id)
 
-    errors = []
-    for category_id in range(13, 19):
-        print(f"Category {category_id}")
-        err = await ChannelDAO.save_thumbnails(filters={"category_id": category_id})
-        errors.extend(err)
-    print(f"Errors: {len(errors)}")
-    await ChannelDAO.update_detail(channel_ids=errors)
+    # errors = []
+    # for category_id in range(13, 19):
+    #     print(f"Category {category_id}")
+    #     err = await ChannelDAO.save_thumbnails(filters={"category_id": category_id})
+    #     errors.extend(err)
+    # print(f"Errors: {len(errors)}")
+    # await ChannelDAO.update_detail(channel_ids=errors)
 
     # tmpl_path = "../video_gen/2024-11/Нейросети/tmpl.png"
     # for category_id in (1, 5, 6, 7):

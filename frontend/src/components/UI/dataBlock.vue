@@ -5,6 +5,7 @@ const props = defineProps(['value', 'valueChange', 'title', 'type'])
 
 const image = {
     views: '/img/iconView.svg',
+    score: '/img/iconIndex.svg',
     subscribers: '/img/iconSubscriber.svg',
     likes: '/img/iconLike.svg',
     clickbaits: '/img/iconClickbaitBlack.svg',

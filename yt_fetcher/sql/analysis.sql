@@ -3,6 +3,42 @@ alter table video drop column is_short;
 alter table category add active boolean default True not null;
 alter table channel  add last_video_fetch_dt timestamp default Null;
 
+ALTER TABLE video
+ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_set_updated_at_video
+BEFORE UPDATE ON video
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+ALTER TABLE category
+ADD COLUMN sort_order INTEGER DEFAULT 1000;
+
+ALTER TABLE channel
+ADD COLUMN data JSONB DEFAULT '{}';
+
+UPDATE video
+SET data = jsonb_build_object(
+    'is_clickbait', is_clickbait,
+    'clickbait_comment', clickbait_comment
+)
+WHERE is_clickbait IS NOT NULL AND clickbait_comment IS NOT NULL;
+
+ALTER TABLE video
+DROP COLUMN is_clickbait,
+DROP COLUMN clickbait_comment;
+
+
+
 -- ! remove all data in the table
 TRUNCATE TABLE report RESTART IDENTITY;
 
@@ -80,14 +116,14 @@ WHERE category_id=7 and report_period='2024-10-01';
 
 select * from channel_period_top_videos limit 3;
 
-select * from report where category_id = 6 and report_period='2024-12-01';
+select * from report where category_id = 2 and report_period='2025-01-01';
 
 select        category_id, rank, channel_id, channel_title,
        ('https://www.youtube.com/' || custom_url) as url,
        description, subscriber_count, view_count
 from report_view
-where category_id in (6) and report_period='2024-12-01'
-and rank in (34, 22, 10, 8, 7)
+where category_id in (2) and report_period='2025-01-01'
+-- and rank in (34, 22, 10, 8, 7)
 -- and channel_id = 'UCFkngbKHD8Qd9XxGrgpF59Q'
 
 select c2.id, c2.name, rv.rank, c.id, c.channel_id, c.channel_title, c.custom_url, last_video_fetch_dt
@@ -234,7 +270,7 @@ select distinct c.id, v.video_id
 from video as v
 left join channel as c on c.channel_id = v.channel_id
 left join video_stat vs on v.video_id = vs.video_id
-where c.category_id>0 and c.status=1 and  vs.id is null
+where c.category_id=1 and c.status=1 and  vs.id is null
 order by c.id;
 
 
@@ -313,7 +349,7 @@ select
 from video as v
 left join channel as ch on v.channel_id = ch.channel_id
 left join category c on c.id = ch.category_id
-where ch.status=1 and v.published_at_period='2025-01-01'
+where ch.status=1 and v.published_at_period='2025-03-01'
 group by 1, 2
 order by 1
 
@@ -348,13 +384,28 @@ SELECT count(t.*)
 FROM public.channel t
 WHERE published_at IS NULL and status=1
 
-delete from channel
-WHERE published_at IS NULL
-and status=1
+select distinct channel_id
+from report_view
+where category_id=1 and report_period='2025-02-01'
 
-DELETE FROM channel_stat
-WHERE channel_id IN (
-    SELECT channel_id FROM channel
-    WHERE published_at IS NULL AND status = 1
-);
 
+
+select count(distinct c.channel_id)
+from channel as c
+left join channel_stat cs on cs.channel_id = c.channel_id and cs.report_period = '2025-03-01'
+where cs.id is null and (c.status = 1)
+limit 1000;
+
+select count(*)
+from channel_stat
+where report_period='2025-03-01' and video_count is null
+-- where data_at>'2025-03-30'
+
+update channel_stat
+set report_period = '2025-02-01'
+where report_period='2025-03-01' and video_count is null
+
+
+select count(distinct channel_id)
+from channel
+where status=1

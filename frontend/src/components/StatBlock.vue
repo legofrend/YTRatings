@@ -66,20 +66,26 @@ function formatTime(seconds, full = false) {
 
 <template>
     <div class="flex flex-auto space-x-1 md:space-x-2 items-baseline text-sm">
-        <data-block type="views" :value="ValDisplay(stat.score)" :value-change="stat.score_change"
+        <data-block type="views" :value="ValDisplay(stat.total_view_count_change)" :value-change="0"
+            title="Общее количество просмотров на канале за период"></data-block>
+        <data-block type="score" :value="ValDisplay(stat.score)" :value-change="stat.score_change"
             :title="scoreTitle"></data-block>
         <data-block type="subscribers" :value="ValDisplay(stat.subscriber_count)"
             :value-change="stat.subscriber_count_change" title="Подписчики"></data-block>
         <data-block type="likes" :value="likeShare + '%'" title="Отношение Лайки/Просмотры"></data-block>
         <data-block type="comments" :value="commentShare + '%'"
             title="Отношение количества комментариев к просмотрам"></data-block>
-        <data-block type="clickbaits" :value="clickbaitShare + '%'" title="Доля кликбейтных названий"></data-block>
+
         <data-block type="videos" :value="stat.videos" title="Количество новых видео за месяц"></data-block>
         <data-block type="shorts" :value="stat.shorts" title="Количество новых клипов за месяц"></data-block>
         <data-block class="hidden md:flex" type="time" :value="formatTime(stat.duration)"
             title="Длительность"></data-block>
 
-        <!-- <div title="Комментарии" v-if="stat.comment_count">🗨{{ ValDisplay(stat.comment_count) }}M</div> -->
+        <!-- 
+        <div title="Комментарии" v-if="stat.comment_count">🗨{{ ValDisplay(stat.comment_count) }}M</div> 
+        <data-block type="clickbaits" :value="clickbaitShare + '%'" title="Доля кликбейтных названий"></data-block>
+         
+        -->
 
 
     </div>

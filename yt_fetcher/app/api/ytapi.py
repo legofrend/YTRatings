@@ -137,7 +137,7 @@ def channel_or_video_list(
             if obj_type in ("channel_stat", "channel_detail"):
                 response = (
                     youtube.channels()
-                    .list(id=part_ids, part="snippet,statistics")
+                    .list(id=part_ids, part="snippet,statistics,contentDetails")
                     .execute()
                 )
             elif obj_type in ("video_stat", "video_detail"):
@@ -213,7 +213,6 @@ def parse_response(response, type: TableType) -> list[dict]:
                 "description": item["snippet"].get("description", ""),
             }
         elif type == "channel_detail":
-
             val = {
                 "channel_id": item.get("id"),
                 "channel_title": info.get("title"),
@@ -221,6 +220,9 @@ def parse_response(response, type: TableType) -> list[dict]:
                 "published_at": published_dt,
                 "custom_url": info.get("customUrl", ""),
                 "thumbnail_url": info.get("thumbnails", {})["medium"]["url"],
+                # "uploads_playlist_id": item.get("contentDetails", {})
+                # .get("relatedPlaylists", {})
+                # .get("uploads"),
             }
         elif type == "channel_stat":
             val = {
@@ -345,5 +347,6 @@ def check_shorts_sync(video_ids: list[str]):
     return data
 
 
+# playlist_id = contentDetails.relatedPlaylists.uploads
 # check_is_short()
 # print("OK")

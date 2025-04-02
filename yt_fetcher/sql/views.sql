@@ -155,9 +155,9 @@ select
     cs.total_video_change,
     cs.total_view_count_change,
     cs.total_view_count_change - c.view_count as view_count_check
-from channel_period_top_change as c
-left join channel_stat_change cs on c.channel_id = cs.channel_id and c.report_period = cs.report_period
-left join channel as ch on ch.channel_id = c.channel_id
+from channel as ch
+left join channel_stat_change cs on ch.channel_id = cs.channel_id
+left join channel_period_top_change as c on ch.channel_id = c.channel_id and c.report_period = cs.report_period
 order by report_period, category_id, rank;
 
 
@@ -180,4 +180,21 @@ SELECT
 FROM ranked as r
 left join video as v on v.video_id = r.video_id;
 
+DROP VIEW IF EXISTS channel_v;
+create view channel_v as
+select ch.*,
+       c.active as category_active,
+       c.category,
+       c.name as category_name,
+       c.title as category_title,
+       c.description as category_description
+from channel as ch
+left join category c on c.id = ch.category_id;
 
+DROP VIEW IF EXISTS video_v;
+create view video_v as
+select v.*,
+       channel.*
+from video as v
+left join channel_v as channel on channel.channel_id=v.channel_id
+-- left join category c on c.id = ch.category_id;

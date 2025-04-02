@@ -37,10 +37,11 @@ class ChannelDAO(BaseDAO):
         query = f"""select distinct c.channel_id
                     from channel as c
                     left join channel_stat cs on cs.channel_id = c.channel_id and cs.report_period = '{report_period.strf()}'
-                    where cs.id is null and (c.status > 0 or c.status is null)
+                    where cs.id is null and (c.status = 1)
                 """
         if category_id:
             query += f" and c.category_id={category_id}"
+        query += " limit 1000"
         query = text(query)
         async with async_session_maker() as session:
             result = await session.execute(query)
@@ -217,6 +218,7 @@ class ChannelStatDAO(BaseDAO):
             channel_ids = await ChannelDAO.get_ids_wo_stat(
                 report_period=report_period, category_id=category_id
             )
+            logger.info(f"Found {len(channel_ids)} channels wo stat")
 
         data = yt.channel_list(channel_ids, obj_type="stat")
 

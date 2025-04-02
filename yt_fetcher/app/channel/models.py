@@ -28,6 +28,11 @@ class Channel(Base):
     custom_url: Mapped[Optional[str]]
     status: Mapped[Optional[int]]
     last_video_fetch_dt: Mapped[Optional[datetime]]
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(), onupdate=func.now()
+    )
+    data: Mapped[dict] = mapped_column(JSONB, server_default="{}")
 
 
 class ChannelStat(Base):

@@ -14,3 +14,4 @@ class Category(Base):
     name: Mapped[str | None]
     title: Mapped[str | None]
     description: Mapped[str | None]
+    sort_order: Mapped[int] = mapped_column(default=1000, server_default="1000")
