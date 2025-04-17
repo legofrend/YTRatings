@@ -122,7 +122,7 @@ select        category_id, rank, channel_id, channel_title,
        ('https://www.youtube.com/' || custom_url) as url,
        description, subscriber_count, view_count
 from report_view
-where category_id in (2) and report_period='2025-01-01'
+where category_id in (1) and report_period='2025-03-01'
 -- and rank in (34, 22, 10, 8, 7)
 -- and channel_id = 'UCFkngbKHD8Qd9XxGrgpF59Q'
 
@@ -285,13 +285,28 @@ order by v.published_at
 -- Get channels without videos for the period
 select c.category_id, c.id, c.channel_id, c.channel_title, count(v.id)
 from channel as c
-left join video v on v.channel_id = c.channel_id and v.published_at_period = '2025-02-01'
-where c.status=1 and c.category_id = 6
+left join video v on v.channel_id = c.channel_id and v.published_at_period = '2025-03-01'
+where c.status=1 and c.category_id = 5
 --   and v.video_id is null
 --     and c.channel_id='UCFkngbKHD8Qd9XxGrgpF59Q'
 group by 1,2,3, 4
 having count(v.id)=0
 order by 1, 2
+
+select count(distinct c.channel_id)
+from channel as c
+left join video v on v.channel_id = c.channel_id --and v.published_at_period = '2025-03-01'
+where c.status = 1 and c.category_id=5
+  and v.id is null
+
+select count(distinct c.channel_id)
+from channel as c
+left join video v on v.channel_id = c.channel_id --and v.published_at_period = '2025-03-01'
+where c.status = 1 and c.category_id=5
+  and v.id is null
+
+
+
 
 select published_at_period, video_id, title, is_clickbait, clickbait_comment
 from video
@@ -314,7 +329,7 @@ order by 1, 2
 select c.category_id, count(*)
 from channel_stat as cs
 left join channel c on cs.channel_id = c.channel_id
-where cs.report_period='2024-12-01' and c.status=1
+where cs.report_period='2025-03-01' and c.status=1
 group by 1
 order by 1;
 -- update channel_stat  set report_period='2024-12-01' where report_period='2025-12-01'
@@ -331,12 +346,24 @@ select count(*)
 from video as v
 where v.is_short=False and v.is_clickbait is null and published_at_period='2025-01-01'
 
-
-select count(*)
+-- videos to update details, i.e. wo duration
+select count(*) from
+(select *
 from video as v
--- where v.is_short is null
+-- where is_short is null and published_at_period<='2025-03-01'  and duration is not null
 where v.duration is null
+--   and published_at_period='2025-03-01'
+);
 
+update video set duration = 0
+where published_at_period>='2025-03-01' and duration is null
+
+update video set is_short = True
+where  is_short is null and published_at_period='2025-03-01' and duration is not null
+
+SELECT pid, now() - pg_stat_activity.query_start AS duration, query
+FROM pg_stat_activity
+WHERE state = 'active';
 
 -- status on category level
 select
@@ -353,6 +380,7 @@ where ch.status=1 and v.published_at_period='2025-03-01'
 group by 1, 2
 order by 1
 
+-- number of channels per category
 select
     c.id,
     c.name,
@@ -369,43 +397,126 @@ SELECT column_name, data_type
 FROM information_schema.columns
 WHERE table_name = 'channel_stat';
 
+-- get channels and stats in order from most view for the period to less
 select
-    c.category,
-    csc.*
+    ch.channel_id
+--     c.category,
+--     csc.*
 from channel_stat_change as csc
 left join channel ch on csc.channel_id = ch.channel_id
 left join category as c on ch.category_id = c.id
 where total_view_count_change is not null
+and category_id=6 and csc.report_period='2025-03-01'
 order by csc.report_period desc, c.category, total_view_count_change desc
 limit 100
 
-
+-- channels without details about published date
 SELECT count(t.*)
 FROM public.channel t
 WHERE published_at IS NULL and status=1
 
-select distinct channel_id
+select * -- distinct channel_id
 from report_view
-where category_id=1 and report_period='2025-02-01'
+where category_id=5 and report_period='2025-03-01'
 
 
 
-select count(distinct c.channel_id)
+select c.channel_id, count(*)
 from channel as c
 left join channel_stat cs on cs.channel_id = c.channel_id and cs.report_period = '2025-03-01'
-where cs.id is null and (c.status = 1)
-limit 1000;
+where  (c.status = 1) and c.category_id=4
+group by 1
+
+-- channels with and without updated videos for the period
+select category_id, c.name,
+       sum(case when last_video_fetch_dt >= '2025-04-01' then 1 else 0 end) as updated,
+       sum(case when last_video_fetch_dt >= '2025-04-01' then 0 else 1 end) as not_updated
+from channel
+left join category c on channel.category_id = c.id
+where status = 1 and category_id>0
+group by 1, 2
+order by 1
+
+
+
+
+select distinct c.channel_id
+--        , c.channel_title,
+--        min(v.published_at_period),
+--        max(v.published_at_period),
+--        count(*)
+from channel as c
+left join video v on c.channel_id = v.channel_id
+where c.status=1 and c.category_id=5
+  and v.id is not null
+and c.last_video_fetch_dt is null
+group by 1, 2
+order by 4
+;
+
+update channel
+set last_video_fetch_dt='2025-04-01 00:00:00'
+where status=1 and channel_id in
+(select distinct c.channel_id
+from channel as c
+left join video v on c.channel_id = v.channel_id
+where c.status=1 and c.category_id=5
+  and v.id is not null
+and c.last_video_fetch_dt is null
+
+)
+
 
 select count(*)
+from(
+select category_id, c.channel_id, channel_title
+from channel as c
+left join channel_stat cs on c.channel_id = cs.channel_id and cs.report_period='2025-03-01'
+where c.status= 1 and c.category_id>0 and cs.id is null
+order by category_id)
+
+
+
+select
+    cur.report_period,
+    c.channel_id,
+    c.channel_title,
+    cur.id,
+    pr.id,
+    cur.channel_view_count,
+    cur.video_count,
+    cur.subscriber_count,
+    case when pr.id is null then null else (cur.channel_view_count - pr.channel_view_count) end as total_view_count_change,
+    case when pr.id is null then null else (cur.video_count - pr.video_count) end as total_video_change,
+    case when pr.id is null then null else (cur.subscriber_count - pr.subscriber_count) end as subscriber_count_change
+from channel as c
+left join channel_stat as cur on cur.channel_id = c.channel_id
+left join channel_stat as pr on pr.channel_id = c.channel_id and pr.report_period = (cur.report_period - INTERVAL '1 month')
+where c.status > 0
+and c.channel_id='UCrp2It0yWUC7XcrWyBIQeKw'
+and cur.report_period='2025-03-01'
+order by 1;
+
+select channel_id, report_period, count(*)
 from channel_stat
-where report_period='2025-03-01' and video_count is null
--- where data_at>'2025-03-30'
+group by 1, 2
+having count(*)>1
 
-update channel_stat
-set report_period = '2025-02-01'
-where report_period='2025-03-01' and video_count is null
-
-
-select count(distinct channel_id)
-from channel
-where status=1
+WITH ranked_stats AS (
+    SELECT
+        id,
+        channel_id,
+        report_period,
+        ROW_NUMBER() OVER (
+            PARTITION BY channel_id, report_period
+            ORDER BY data_at ASC
+        ) as rn
+    FROM channel_stat
+)
+UPDATE channel_stat
+SET report_period = NULL
+WHERE id IN (
+    SELECT id
+    FROM ranked_stats
+    WHERE rn > 1
+);

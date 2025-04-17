@@ -23,25 +23,57 @@ from app.channel import ChannelDAO, ChannelStatDAO, VideoDAO, VideoStatDAO
 # 12 Игры
 
 
-async def actions():
-    category_id = 4
+async def prepare_monthly_report(step: int = 0):
+    category_id = 10
     period = Period(3)
     per_range = [date(2025, 3, 1), date(2025, 4, 1)]
 
-    start_dt = datetime.now()
-    print("Start", start_dt)
+    step = step or 3
 
-    # await ChannelDAO.search_by_keywords(
-    #     "новости и обзоры компьютерных игр",
-    #     iterations=12,
-    #     date_step=30,
-    #     date_from=datetime(2024, 11, 1),
-    #     type="video",
-    #     max_result=50,
-    #     # order="viewCount",
-    # )
+    ids = """""".split("\n")
+    # Step 1. Update stat per channels
+    if step == 1:
+        res = await ChannelStatDAO.update_stat(report_period=period)
+        print(f"Updated {len(res)} records")
 
-    names = """""".split(" ")  #
+    # Step 2. Fetch new videos
+    if step == 2:
+        res = await ChannelDAO.fetch_new_videos(
+            category_ids=list(range(14, 19)), date_from=None, date_to=per_range[1]
+        )
+        # print(f"Fetched {len(res)} records")
+
+    # Step 3. Update detail for videos without duration and or is_short
+    if step == 3:
+        for _ in range(0, 100):
+            print(f"{_} out of 100")
+            res = await VideoDAO.update_detail()
+            # if res:
+            #     print(f"Updated details for {len(res)} records")
+        # res =await VideoDAO.update_is_short()
+        # await upload_from_json_file()
+        # res = await VideoDAO.eval_clickbait({"published_at_period": period})
+
+    # Step 4. Update stat for videos
+    if step == 4:
+        res = await VideoStatDAO.update_stat(
+            report_period=period, category_id=category_id
+        )
+        print(f"Updated {len(res)} records")
+
+    # Step 5. Build reports
+    if step == 5:
+        for i in (1,):
+            for category_id in (5, 7, 8):
+                await ReportDAO.build(period, category_id)
+
+    return True
+
+
+def prepare_materials():
+    pass
+
+    # names = """""".split(" ")  #
     ids = """""".split("\n")
 
     # ch_ids = await ChannelDAO.add_channels(names, category_id=category_id)
@@ -52,27 +84,15 @@ async def actions():
     #     report_period=period, channel_ids=ch_ids, category_id=category_id
     # )
 
-    # res = await ChannelStatDAO.update_stat(report_period=period)
-    # print(f"Updated {len(res)} records")
-
-    await ChannelDAO.search_new_by_category_period(
-        period=per_range, category_ids=category_id
-    )
-    # or
-
-    # await VideoDAO.search_new_by_channel_period(period=per_range, channel_ids=ids)
-    # await VideoDAO.update_detail()
-    # await upload_from_json_file()
-
-    # await VideoDAO.update_is_short()
-
-    # await VideoStatDAO.update_stat(report_period=period, category_id=category_id)
-    # for i in range(3):
-    # await VideoDAO.eval_clickbait({"published_at_period": period})
-
-    # for i in (1,):
-    # for category_id in (1, 4, 5, 6, 7, 8, 11, 12):
-    # await ReportDAO.build(period, category_id)
+    # await ChannelDAO.search_by_keywords(
+    #     "новости и обзоры компьютерных игр",
+    #     iterations=12,
+    #     date_step=30,
+    #     date_from=datetime(2024, 11, 1),
+    #     type="video",
+    #     max_result=50,
+    #     # order="viewCount",
+    # )
 
     # errors = []
     # for category_id in range(13, 19):
@@ -87,10 +107,6 @@ async def actions():
     #     await ReportDAO.generate_info_images(
     #         period, category_id, top_channels=20, top_videos_count=0
     #     )
-
-    print("Finish after ", datetime.now() - start_dt)
-
-    return True
 
 
 async def upload_from_csv_file():
@@ -145,7 +161,12 @@ async def upload_from_json_file():
 
 
 def main():
-    asyncio.run(actions())
+    start_dt = datetime.now()
+    print("Start", start_dt)
+
+    asyncio.run(prepare_monthly_report())
+
+    print("Finish after ", datetime.now() - start_dt)
 
 
 if __name__ == "__main__":

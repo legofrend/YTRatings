@@ -2,14 +2,71 @@ import csv
 import json
 import logging
 from datetime import datetime, UTC
+from logging.handlers import RotatingFileHandler
 from pythonjsonlogger import jsonlogger
 
 from app.config import settings
 
 
-logger = logging.getLogger()
+def setup_logger():
+    logger = logging.getLogger("ytr")
+    logger.setLevel(settings.LOG_LEVEL)
 
-logHandler = logging.StreamHandler()
+    # Форматтер для логов
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+
+    # Хендлер для файла с ротацией (10MB максимум, 5 бэкапов)
+    file_handler = RotatingFileHandler(
+        "logs/yt_fetcher.log",
+        maxBytes=10 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",  # Добавляем явное указание кодировки UTF-8
+    )
+    file_handler.setFormatter(formatter)
+
+    # Хендлер для консоли
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+
+    return logger
+
+
+logger = setup_logger()
+
+
+# logger = logging.getLogger()
+
+# logHandler = logging.StreamHandler()
+
+
+class CustomJsonFormatter(jsonlogger.JsonFormatter):
+    def add_fields(self, log_record, record, message_dict):
+        super(CustomJsonFormatter, self).add_fields(log_record, record, message_dict)
+        if not log_record.get("timestamp"):
+            now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            log_record["timestamp"] = now
+        if log_record.get("level"):
+            log_record["level"] = log_record["level"].upper()
+        else:
+            log_record["level"] = record.levelname
+
+
+# formatter = CustomJsonFormatter(
+#     "%(timestamp)s %(level)s %(message)s %(module)s %(funcName)s"
+# )
+
+
+# logHandler.setFormatter(formatter)
+# logger.addHandler(logHandler)
+# logger.setLevel(settings.LOG_LEVEL)
+
+# logger.debug("Debug message")
+# logger.info("Info message")
+# logger.error("Error message", extra={"table": "tt"}, exc_info=True)
+
 
 #####################################
 # Some function to save log data
@@ -53,28 +110,3 @@ def save_errors(errors, type: str):
 
 
 #####################################
-
-
-class CustomJsonFormatter(jsonlogger.JsonFormatter):
-    def add_fields(self, log_record, record, message_dict):
-        super(CustomJsonFormatter, self).add_fields(log_record, record, message_dict)
-        if not log_record.get("timestamp"):
-            now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-            log_record["timestamp"] = now
-        if log_record.get("level"):
-            log_record["level"] = log_record["level"].upper()
-        else:
-            log_record["level"] = record.levelname
-
-
-formatter = CustomJsonFormatter(
-    "%(timestamp)s %(level)s %(message)s %(module)s %(funcName)s"
-)
-
-logHandler.setFormatter(formatter)
-logger.addHandler(logHandler)
-logger.setLevel(settings.LOG_LEVEL)
-
-# logger.debug("Debug message")
-# logger.info("Info message")
-# logger.error("Error message", extra={"table": "tt"}, exc_info=True)

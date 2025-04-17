@@ -53,6 +53,7 @@ class VideoDAO(BaseDAO):
             video_ids = await cls.get_ids(
                 filters={
                     "duration": None,
+                    # "published_at_period": date(2025, 3, 1),
                 }
             )
             logger.info(f"Found videos without duration: {len(video_ids)}")
@@ -60,6 +61,7 @@ class VideoDAO(BaseDAO):
                 return None
         try:
             data = yt.video_list(video_ids, obj_type="detail")
+            logger.info(f"Fetched videos: {len(video_ids)}")
             if not data:
                 return None
             # await yt.check_shorts(data)
@@ -73,7 +75,7 @@ class VideoDAO(BaseDAO):
 
     @classmethod
     async def update_is_short(cls):
-        res = await cls.find_all(is_short=None)
+        res = await cls.find_all(is_short=None, published_at_period=date(2025, 3, 1))
         if not res:
             return None
         data = [dict(video_id=item.video_id, is_short=item.is_short) for item in res]
@@ -89,45 +91,50 @@ class VideoDAO(BaseDAO):
         return data
 
     @classmethod
+    async def get_from_playlist(
+        cls,
+        id: str,
+        date_from: datetime = None,
+        max_result: int = 500,
+    ):
+
+        videos = yt.playlistitem_list(id, date_from=date_from, max_result=max_result)
+        if videos:
+            await cls.add_update_bulk(videos, do_nothing=True)
+            return videos
+        return None
+
+    @classmethod
     async def search_new_by_channel_period(
         cls,
-        channel_ids: list[str] | str,
+        channel_id: str,
         period: Period | tuple[datetime, datetime] = Period(),
     ):
-        if isinstance(channel_ids, str):
-            channel_ids = [channel_ids]
-
         if isinstance(period, Period):
             period = period.as_range()
 
         if isinstance(period, tuple) and len(period) != 2:
             raise Exception("Invalid period")
 
-        data = []
+        try:
+            videos = yt.search_list(
+                "",
+                published=period,
+                type="video",
+                channel_id=channel_id,
+                order="date",
+                max_result=500,
+            )
+            if videos:
+                await cls.add_update_bulk(videos, do_nothing=True)
+                return videos
 
-        for index in range(0, len(channel_ids)):
-            channel_id = channel_ids[index]
-            logger.info(f"{index+1}/{len(channel_ids)}: {channel_id}")
-            try:
-                videos = yt.search_list(
-                    "",
-                    published=period,
-                    type="video",
-                    channel_id=channel_id,
-                    order="date",
-                    max_result=500,
-                )
-                if videos:
-                    await cls.add_update_bulk(videos, do_nothing=True)
-                    data.extend(videos)
-
-            except Exception as e:
-                logger.error(
-                    f"Can't get videos for channel id {index}: {channel_id}",
-                    exc_info=True,
-                )
-
-        return data
+        except Exception as e:
+            logger.error(
+                f"Can't get videos for {channel_id=}",
+                exc_info=True,
+            )
+            return None
 
     @classmethod
     async def get_thumbnails(
@@ -194,8 +201,12 @@ class VideoStatDAO(BaseDAO):
             video_ids = await VideoDAO.get_ids_wo_stat(
                 report_period=report_period, category_id=category_id
             )
+            logger.info(f"Found videos without stat: {len(video_ids)}")
+            if not video_ids:
+                return None
 
         data = yt.video_list(video_ids, obj_type="stat")
+        logger.info(f"Fetched video stats: {len(data)}")
 
         if data:
             for item in data:

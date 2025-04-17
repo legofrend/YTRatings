@@ -19,7 +19,9 @@ DATABASE_URL = settings.DATABASE_URL
 # session_maker = sessionmaker(engine, expire_on_commit=False)
 
 # async version
-async_engine = create_async_engine(DATABASE_URL, echo=False)
+async_engine = create_async_engine(
+    DATABASE_URL, echo=False, connect_args={"command_timeout": 50}  # таймаут в секундах
+)
 async_session_maker = async_sessionmaker(async_engine, expire_on_commit=False)
 
 # this is for testing

@@ -1,7 +1,7 @@
 from datetime import date, datetime, timedelta
 
 
-from sqlalchemy import text
+from sqlalchemy import text, select, or_
 
 # from sqlalchemy.exc import SQLAlchemyError
 
@@ -56,12 +56,12 @@ class ChannelDAO(BaseDAO):
         category_id: int = None,
     ):
         # TODO replace with alchemy query
-        query = f"""select c.channel_id, count(*)
+        query = f"""select c.channel_id
                     from channel as c
                     left join video v on v.channel_id = c.channel_id and v.published_at_period = '{report_period.strf()}'
-                    where c.status = 1"""
+                    where c.status = 1 and v.id is null"""
         query += f" and c.category_id={category_id}" if category_id else ""
-        query += " group by c.channel_id having count(*) = 0"
+        # query += " group by c.channel_id having count(v.id) = 0"
         query = text(query)
         async with async_session_maker() as session:
             result = await session.execute(query)
@@ -172,24 +172,76 @@ class ChannelDAO(BaseDAO):
         return await cls.update_detail(unique_channel_ids, do_nothing=True)
 
     @classmethod
-    async def search_new_by_category_period(
+    async def get_channels_to_fetch_videos(
+        cls,
+        category_id: int = None,
+        date_to: date = date.today(),
+    ):
+        query = select(Channel.channel_id, Channel.last_video_fetch_dt).where(
+            Channel.status == 1,
+            or_(
+                Channel.last_video_fetch_dt.is_(None),
+                Channel.last_video_fetch_dt < date_to,
+            ),
+        )
+        if category_id:
+            query = query.where(Channel.category_id == category_id)
+        query = query.limit(1000).order_by(Channel.last_video_fetch_dt.desc())
+
+        query = f"""select
+    ch.channel_id, ch.last_video_fetch_dt
+    
+from channel_stat_change as csc
+left join channel ch on csc.channel_id = ch.channel_id
+left join category as c on ch.category_id = c.id
+where total_view_count_change is not null
+and (ch.last_video_fetch_dt  is null or ch.last_video_fetch_dt < '{date_to}') 
+and category_id={category_id} and csc.report_period='2025-03-01'
+order by csc.report_period desc, c.category, total_view_count_change desc
+"""
+        query = text(query)
+
+        async with async_session_maker() as session:
+            result = await session.execute(query)
+            data = result.mappings().all()
+            # data = [item["channel_id"] for item in data]
+            return data
+
+    @classmethod
+    async def fetch_new_videos(
         cls,
         category_ids: list[int] | int,
-        period: Period | tuple[datetime, datetime] = Period(),
+        date_from: date = None,
+        date_to: date = date.today(),
+        # period: Period | tuple[datetime, datetime] = Period(),
     ):
+
         if isinstance(category_ids, int):
             category_ids = [category_ids]
-        for category_id in category_ids:
-            # TODO finish method wo_videos
-            # channel_ids = ChannelDAO.get_ids_wo_video(
-            #     filters={"category_id": category_id, "report_period": period}
-            # )
-            channel_ids = await cls.get_ids(
-                filters={"category_id": category_id, "status": 1}
+        # if isinstance(period, Period):
+        #     period = period.as_range()
+        # date_from = period
+
+        for i, category_id in enumerate(category_ids, start=1):
+            channels = await cls.get_channels_to_fetch_videos(
+                date_to=date_to,
+                category_id=category_id,
             )
-            await VideoDAO.search_new_by_channel_period(channel_ids, period)
+            for index, channel in enumerate(channels, start=1):
+                channel_id = channel["channel_id"]
+                date_from = channel["last_video_fetch_dt"] or date_from
+                logger.info(f"{index}/{len(channels)}: {channel_id}")
+                res = await VideoDAO.get_from_playlist(
+                    channel_id, date_from=date_from, max_result=50
+                )
+                # ToDo различать ситуации, когда видео нет из-за ошибки или их просто нет
+                await cls.update(
+                    {"channel_id": channel_id},
+                    {"last_video_fetch_dt": date_to},
+                )
+
             logger.info(
-                f"Updated {len(channel_ids)} channels for category {category_id}"
+                f"Category {i}/{len(category_ids)}: Updated {len(channels)} channels"
             )
 
         return True

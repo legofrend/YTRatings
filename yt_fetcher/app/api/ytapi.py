@@ -1,6 +1,7 @@
 import asyncio
 import time
-import nest_asyncio
+
+# import nest_asyncio
 import aiohttp
 from typing import Literal
 from googleapiclient.discovery import build
@@ -10,12 +11,18 @@ import re
 from app.logger import logger
 from app.config import settings
 
-nest_asyncio.apply()
+from googleapiclient.errors import HttpError
+
+
+class QuotaExceededException(Exception):
+    pass
 
 
 YT_TIME_REGEX = re.compile(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?")
 DATETIME_YT_F = "%Y-%m-%dT%H:%M:%SZ"
 DATETIME_YT_F2 = "%Y-%m-%dT%H:%M:%S.%fZ"
+
+IS_QUOTA_EXCEEDED = False
 
 OrderType = Literal["date", "rating", "relevance", "title", "videoCount", "viewCount"]
 # videoCount – Channels are sorted in descending order of their number of uploaded videos.
@@ -34,12 +41,23 @@ def dt2ytfmt(dt: datetime):
     return dt.strftime(DATETIME_YT_F)
 
 
+def ytfmt2dt(dt_str: str) -> datetime | None:
+    format = DATETIME_YT_F if "." not in dt_str else DATETIME_YT_F2
+    try:
+        dt = datetime.strptime(dt_str, format)
+    except ValueError:
+        logger.error(f"Invalid datetime string: {dt_str}")
+        return None
+    return dt
+
+
 def parse_yt_time(s):
     if not s:
         return 0
     if not isinstance(s, str):
         return int(s)
-
+    if s == "P0D":
+        return 0
     m = YT_TIME_REGEX.match(s)
     if not m:
         logger.error("invalid string " + s)
@@ -58,7 +76,9 @@ def search_list(
     channel_id: str = None,
     page_token: str = None,
 ):
-
+    global IS_QUOTA_EXCEEDED
+    if IS_QUOTA_EXCEEDED:
+        raise QuotaExceededException("YouTube API quota exceeded")
     params = {
         # "q": query,
         "part": "snippet",
@@ -88,6 +108,15 @@ def search_list(
             response = youtube.search().list(q=query, **params).execute()
             d = parse_response(response, type=type)
             data.extend(d)
+        except HttpError as e:
+            if e.resp.status == 403 and "quotaExceeded" in str(e):
+                logger.error(
+                    "YouTube API quota exceeded",
+                    extra={"query": query, "params": params, "response": response},
+                    exc_info=True,
+                )
+                IS_QUOTA_EXCEEDED = True
+                return data
         except Exception as e:
             logger.error(
                 "Can't execute search list",
@@ -119,10 +148,107 @@ def search_list(
     return data
 
 
+def playlistitem_list(
+    playlist_id: str, date_from: datetime = None, max_result: int = 500
+) -> list[dict]:
+    """
+    Get all videos from playlist published after date_from
+    """
+    global IS_QUOTA_EXCEEDED
+    if IS_QUOTA_EXCEEDED:
+        raise QuotaExceededException("YouTube API quota exceeded")
+
+    if playlist_id.startswith("UC"):
+        playlist_id = "UU" + playlist_id[2:]
+
+    params = {
+        "part": "snippet,contentDetails",
+        "playlistId": playlist_id,
+        "maxResults": 50,
+    }
+
+    data = []
+    next_page_token = None
+    continue_cycle = True
+
+    while continue_cycle:
+        try:
+            if next_page_token:
+                params["pageToken"] = next_page_token
+
+            response = youtube.playlistItems().list(**params).execute()
+
+            # Parse items
+            for item in response.get("items", []):
+                snippet = item.get("snippet", {})
+                content = item.get("contentDetails", {})
+
+                published_dt = ytfmt2dt(snippet.get("publishedAt"))
+
+                if date_from and published_dt < date_from:
+                    # Если мы достигли старых видео, предполагаем что дальше будут еще более старые
+                    continue_cycle = False
+                    # break
+                    # continue
+
+                published_period_dt = published_dt.replace(day=1)
+                url = "https://www.youtube.com/watch?v=" + content.get("videoId")
+                video = {
+                    "video_id": content.get("videoId"),
+                    "channel_id": snippet.get("channelId"),
+                    "title": snippet.get("title"),
+                    "description": snippet.get("description"),
+                    "published_at": published_dt,
+                    "published_at_period": published_period_dt,
+                    "video_url": url,
+                    "thumbnail_url": snippet.get("thumbnails", {})
+                    .get("high", {})
+                    .get("url"),
+                    #     "channel_title": snippet.get("channelTitle"),
+                    #     "position": snippet.get("position"),
+                }
+
+                data.append(video)
+
+            next_page_token = response.get("nextPageToken")
+            if not next_page_token or len(data) >= max_result:
+                break
+
+        except HttpError as e:
+            if e.resp.status == 403 and "quotaExceeded" in str(e):
+                logger.error(
+                    "YouTube API quota exceeded",
+                    extra={"playlist_id": playlist_id, "error": str(e)},
+                    exc_info=True,
+                )
+                IS_QUOTA_EXCEEDED = True
+                return data
+
+            logger.error(
+                "Can't execute playlist items list",
+                extra={"playlist_id": playlist_id, "error": str(e)},
+                exc_info=True,
+            )
+            break
+        except Exception as e:
+            logger.error(
+                "Can't execute playlist items list",
+                extra={"playlist_id": playlist_id, "error": str(e)},
+                exc_info=True,
+            )
+            break
+
+    return data
+
+
 def channel_or_video_list(
     ids: list | str,
     obj_type: Literal["channel_stat", "video_stat", "channel_detail", "video_detail"],
 ):
+    global IS_QUOTA_EXCEEDED
+    if IS_QUOTA_EXCEEDED:
+        raise QuotaExceededException("YouTube API quota exceeded")
+
     if isinstance(ids, str):
         ids = [ids]
 
@@ -153,6 +279,15 @@ def channel_or_video_list(
             data.extend(d)
 
             iter += step
+        except HttpError as e:
+            if e.resp.status == 403 and "quotaExceeded" in str(e):
+                logger.error(
+                    "YouTube API quota exceeded",
+                    extra={"obj_type": obj_type, "response": response},
+                    exc_info=True,
+                )
+                IS_QUOTA_EXCEEDED = True
+                return data
         except Exception as e:
             logger.error(
                 "Can't execute list",
@@ -181,16 +316,10 @@ def video_list(
 def parse_response(response, type: TableType) -> list[dict]:
     data = []
     for item in response.get("items"):
-        info = item.get("snippet")
+        snippet = item.get("snippet")
         stat = item.get("statistics")
-        if info and info.get("publishedAt"):
-            try:
-                published_dt = datetime.strptime(info.get("publishedAt"), DATETIME_YT_F)
-            except Exception as e:
-                published_dt = datetime.strptime(
-                    info.get("publishedAt"), DATETIME_YT_F2
-                )
-                # TODO: check
+        if snippet and snippet.get("publishedAt"):
+            published_dt = ytfmt2dt(snippet.get("publishedAt"))
             published_period_dt = published_dt.replace(day=1)
 
         if type == "video":
@@ -215,14 +344,14 @@ def parse_response(response, type: TableType) -> list[dict]:
         elif type == "channel_detail":
             val = {
                 "channel_id": item.get("id"),
-                "channel_title": info.get("title"),
-                "description": info.get("description", ""),
+                "channel_title": snippet.get("title"),
+                "description": snippet.get("description", ""),
                 "published_at": published_dt,
-                "custom_url": info.get("customUrl", ""),
-                "thumbnail_url": info.get("thumbnails", {})["medium"]["url"],
-                # "uploads_playlist_id": item.get("contentDetails", {})
-                # .get("relatedPlaylists", {})
-                # .get("uploads"),
+                "custom_url": snippet.get("customUrl", ""),
+                "thumbnail_url": snippet.get("thumbnails", {})["medium"]["url"],
+                "uploads_playlist_id": item.get("contentDetails", {})
+                .get("relatedPlaylists", {})
+                .get("uploads"),
             }
         elif type == "channel_stat":
             val = {
