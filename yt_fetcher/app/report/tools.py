@@ -253,17 +253,19 @@ def gen_script(data: list[SChannel], tmpl_file: str, output_file: str):
 
 def save_thumbnails(channels: list[SChannel], output_dir: str = None):
 
-    output_dir = (
+    main_dir = (
         output_dir
         or r"C:\Users\eremi\Documents\4. Projects\2024-07 YTRatings\frontend\public\channel_logo"
     )
+    output_dir = main_dir + os.sep + "new"
     os.makedirs(output_dir, exist_ok=True)
     errors = []
     downloaded = 0
     for channel in channels:
         logo_file = channel.custom_url or channel.channel_id
+        logo_file_check = os.path.join(main_dir, logo_file + ".jpg")
         logo_file = os.path.join(output_dir, logo_file + ".jpg")
-        if not os.path.exists(logo_file):
+        if not os.path.exists(logo_file_check):
             if not download_file(channel.thumbnail_url, logo_file):
                 logger.error(
                     f"Can't download logo for channel {channel.custom_url}: {channel.thumbnail_url}"
@@ -276,3 +278,54 @@ def save_thumbnails(channels: list[SChannel], output_dir: str = None):
     if errors:
         logger.error(f"Can't download {len(errors)} thumbnails")
     return errors
+
+
+async def upload_from_csv_file(filename: str):
+    import csv
+
+    # Чтение CSV и преобразование в JSON
+    with open(filename, mode="r", encoding="utf-8") as csv_file:
+        csv_reader = csv.DictReader(csv_file, delimiter="\t")
+        json_data = [row for row in csv_reader]
+
+    njson_data = []
+    for item in json_data:
+        is_short = item.get("is_short", "").strip()
+        if not is_short:  # Skip empty values
+            continue
+
+        item["is_short"] = bool(item["is_short"])
+        njson_data.append(item)
+
+    # print("Found records with data ", len(njson_data))
+
+    # res = await VideoDAO.update_bulk(njson_data)
+
+
+# TODO: To be rewrited if used
+async def upload_from_json_file():
+    import json
+    import csv
+
+    csv_file_path = "logs/2025-04-18-23-11-23_video_is_short_errors_.csv"
+
+    def convert_bool(value):
+        if isinstance(value, str):
+            return value.lower() == "true"
+        return bool(value)
+
+    with open(csv_file_path, mode="r", encoding="utf-8") as file:
+        csv_reader = csv.DictReader(file, delimiter="\t")
+        json_data = [
+            {
+                **row,
+                "is_short": (
+                    convert_bool(row["is_short"]) if "is_short" in row else None
+                ),
+            }
+            for row in csv_reader
+        ]
+
+    # print(len(json_data))
+
+    # res = await VideoDAO.update_bulk(json_data)

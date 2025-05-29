@@ -3,6 +3,7 @@ from openai import OpenAI
 import json
 from app.config import settings
 from app.logger import logger, save_errors
+import os
 
 client = OpenAI(
     api_key=settings.OAI_API_KEY,
@@ -60,31 +61,67 @@ MODELS = Literal[
 # Функция для отправки запроса к ChatGPT
 def chat_with_gpt(
     prompt: str,
+    file_prompt: str = None,
     model: MODELS = "gpt-4o-mini",
     temperature: float = 0.7,
     is_json: bool = False,
+    data: list = None,
+    limit: int = 10,
 ):
-    response = client.chat.completions.create(
-        messages=[
-            {
-                "role": "user",
-                "content": prompt,
-            }
-        ],
-        model=model,
-        max_tokens=15000,  # Максимальное количество токенов в ответе
-        temperature=temperature,  # Креативность (от 0 до 1)
-    )
-    logger.info("Total tokens: " + str(response.usage.total_tokens))
+    responses = []
 
-    content = response.choices[0].message.content
-    # save_errors(content, "ai_resp")
-    if is_json:
-        try:
-            content_json = json.loads(content)
-            return content_json
-        except Exception as e:
-            logger.error("Can't parse content to JSON: " + str(e))
-            save_errors(content, "ai_resp")
+    # Prepare base prompt
+    if file_prompt:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        file_prompt = os.path.join(current_dir, "prompts", f"{file_prompt}.txt")
+        if not os.path.exists(file_prompt):
+            logger.error(f"File {file_prompt} not found")
             return None
-    return content
+        with open(file_prompt, "r", encoding="utf-8") as f:
+            prompt_instructions = f.read()
+        base_prompt = prompt_instructions + "\n"
+    else:
+        base_prompt = ""
+
+    # Process data in batches (or single item if no data)
+    data_to_process = (
+        [data]
+        if data is None
+        else [data[i : i + limit] for i in range(0, len(data), limit)]
+    )
+
+    for i, batch in enumerate(data_to_process):
+        # Prepare full prompt for this batch
+        if data is not None:
+            json_str = json.dumps(batch, ensure_ascii=False, indent=2)
+            prompt_full = base_prompt + prompt + "\n" + json_str + "\n"
+        else:
+            prompt_full = base_prompt + prompt
+
+        # Make API call
+        response = client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt_full}],
+            model=model,
+            max_tokens=15000,
+            temperature=temperature,
+            response_format={"type": "json_object" if is_json else "text"},
+        )
+        logger.info("Total tokens: " + str(response.usage.total_tokens))
+
+        content = response.choices[0].message.content
+        if is_json:
+            try:
+                content_json = json.loads(content)
+                responses.extend(
+                    content_json if isinstance(content_json, list) else [content_json]
+                )
+            except Exception as e:
+                logger.error("Can't parse content to JSON: " + str(e))
+                save_errors(content, "ai_resp")
+        else:
+            responses.append(content)
+
+        if data is not None:
+            logger.info(f"Progress: {i*limit+len(batch)}/{len(data)}")
+
+    return responses[0] if data is None else responses

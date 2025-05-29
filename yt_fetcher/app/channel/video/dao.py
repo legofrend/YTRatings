@@ -1,14 +1,16 @@
-from datetime import date, datetime
-from sqlalchemy import text
+from datetime import date, datetime, UTC
+from sqlalchemy import text, select, or_, and_
 
 from app.dao.base import BaseDAO
 from app.database import async_session_maker
-from app.logger import logger, save_errors
+from app.logger import logger, save_errors, save_json_csv
 from app.period.period import Period
 import app.api.ytapi as yt
 import app.api.openaiapi as oai
 
 from app.channel.video.models import Video, VideoStat
+import csv
+import json
 
 
 class VideoDAO(BaseDAO):
@@ -37,7 +39,7 @@ class VideoDAO(BaseDAO):
                         left join channel as c on c.channel_id = v.channel_id
                         left join video_stat vs on v.video_id = vs.video_id and vs.report_period = '{report_period.strf()}'
                         where vs.id is null and v.published_at_period >= '{published_at_period.strf()}'
-                        and c.status=1
+                        and c.status=1 and v.status=1
                     """
             if category_id:
                 query += f" and c.category_id={category_id}"
@@ -48,11 +50,31 @@ class VideoDAO(BaseDAO):
             return data
 
     @classmethod
+    async def get_ids_wo_is_short(
+        cls,
+        category_id: int = None,
+    ):
+        async with async_session_maker() as session:
+            query = f"""select v.video_id
+                        from video as v
+                        where v.status=1 and not is_short and v.published_at_period >= '2025-03-01'
+                        and duration between 60 and 180 and updated_at < '2025-05-02'
+                    """
+            # if category_id:
+            #     query += f" and c.category_id={category_id}"
+            query = text(query)
+            result = await session.execute(query)
+            data = result.mappings().all()
+            data = [dict(video_id=item.video_id, is_short=None) for item in data]
+            return data
+
+    @classmethod
     async def update_detail(cls, video_ids: list[str] | str = None):
         if not video_ids:
             video_ids = await cls.get_ids(
                 filters={
                     "duration": None,
+                    "status": 1,
                     # "published_at_period": date(2025, 3, 1),
                 }
             )
@@ -74,21 +96,41 @@ class VideoDAO(BaseDAO):
         return data
 
     @classmethod
-    async def update_is_short(cls):
-        res = await cls.find_all(is_short=None, published_at_period=date(2025, 3, 1))
-        if not res:
-            return None
-        data = [dict(video_id=item.video_id, is_short=item.is_short) for item in res]
-        logger.info(f"Found videos without is_short: {len(data)}")
+    async def update_is_short(cls, video_list: list[str] = None, from_file: str = None):
+
+        if not video_list:
+            if from_file:
+                with open(from_file, mode="r", encoding="utf-8") as file:
+                    csv_reader = csv.DictReader(
+                        file, delimiter="\t"
+                    )  # используем табуляцию как разделитель
+                    video_list = [
+                        {"video_id": row["video_id"], "is_short": None}
+                        for row in csv_reader
+                    ]
+            else:
+                video_list = await cls.get_ids_wo_is_short()
+                # res = await cls.find_all(is_short=None, status=1)
+                if not video_list:
+                    return None
+            logger.info(f"Found videos without is_short: {len(video_list)}")
+
         try:
-            await yt.check_shorts(data)
-            save_errors(data, "video_is_short")
-            await cls.update_bulk(data)
+            await yt.check_shorts(video_list)
+            logger.info(f"Fetched info about videos: {len(video_list)}")
+            try:
+                filename = "logs/list_filled.csv"
+                save_json_csv(video_list, filename)
+            except Exception as e:
+                with open(filename, "w", encoding="utf-8") as file:
+                    file.write(str(video_list))
+
+            await cls.update_bulk(video_list)
         except:
             logger.error("Can't update video detail", exc_info=True)
-            save_errors(data, "video_detail")
+            save_errors(video_list, "video_detail")
 
-        return data
+        return video_list
 
     @classmethod
     async def get_from_playlist(
@@ -183,6 +225,12 @@ class VideoDAO(BaseDAO):
                 responses.extend(response)
                 # await cls.update_bulk(response)
             logger.info(f"Progress: {i+LIMIT}/{len(videos)}")
+
+        # Save responses to file
+        filename = f"logs/gpt_out_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.txt"
+        with open(filename, "w", encoding="utf-8") as f:
+            json.dump(responses, f, ensure_ascii=False, indent=2)
+
         save_errors(responses, "clickbait")
         await cls.update_bulk(responses)
 

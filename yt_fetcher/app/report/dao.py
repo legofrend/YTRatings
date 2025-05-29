@@ -88,6 +88,7 @@ class ReportDAO(BaseDAO):
         data = await select_view(
             "report_view",
             filters={"report_period": period.strf(), "category_id": category_id},
+            conditions=["rank <= 100"],
         )
 
         top_videos = await cls._query_top_videos(period, category_id, top_number=5)
@@ -101,26 +102,32 @@ class ReportDAO(BaseDAO):
         return channels
 
     @classmethod
-    async def build(cls, period: Period, category_id: int):
-        data = await cls.query_report_view(period, category_id)
-        if not data:
-            return None
+    async def build(cls, period: Period, category_ids: int):
+        if isinstance(category_ids, int):
+            category_ids = [category_ids]
+        for i, category_id in enumerate(category_ids, start=1):
+            logger.info(f"{i}/{len(category_ids)}: category {category_id}")
+            logger.debug("Getting data from view")
+            data = await cls.query_report_view(period, category_id)
+            if not data:
+                return None
 
-        res = await cls.add_or_update(
-            data={
-                "report_period": period,
-                "category_id": category_id,
-                "data": data,
-            },
-            do_nothing=False,
-        )
-        msg = f"report for {period}, category {category_id}: {res}"
-        if not res:
-            logger.error(f"Cannot add {msg}")
-            return None
+            logger.debug("Adding data to database")
+            res = await cls.add_or_update(
+                data={
+                    "report_period": period,
+                    "category_id": category_id,
+                    "data": data,
+                },
+                do_nothing=False,
+            )
+            msg = f"report for {period}, category {category_id}: {res}"
+            if not res:
+                logger.error(f"Cannot add {msg}")
+                return None
 
-        logger.info(f"Added {msg}")
-        return res
+            logger.info(f"Added {msg}")
+        return True
 
     @classmethod
     async def get(cls, period: Period | date | str, category_id: int):

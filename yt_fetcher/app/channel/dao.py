@@ -1,7 +1,7 @@
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 
-from sqlalchemy import text, select, or_
+from sqlalchemy import text, select, or_, and_
 
 # from sqlalchemy.exc import SQLAlchemyError
 
@@ -33,20 +33,26 @@ class ChannelDAO(BaseDAO):
         report_period: Period,
         category_id: int = None,
     ):
-        # TODO replace with alchemy query
-        query = f"""select distinct c.channel_id
-                    from channel as c
-                    left join channel_stat cs on cs.channel_id = c.channel_id and cs.report_period = '{report_period.strf()}'
-                    where cs.id is null and (c.status = 1)
-                """
-        if category_id:
-            query += f" and c.category_id={category_id}"
-        query += " limit 1000"
-        query = text(query)
+
         async with async_session_maker() as session:
+            query = (
+                select(Channel.channel_id)
+                .outerjoin(
+                    ChannelStat,
+                    and_(
+                        Channel.channel_id == ChannelStat.channel_id,
+                        ChannelStat.report_period == report_period.strf(),
+                    ),
+                )
+                .where(and_(ChannelStat.id.is_(None), Channel.status == 1))
+                .distinct()
+            )
+
+            if category_id:
+                query = query.where(Channel.category_id == category_id)
+
             result = await session.execute(query)
-            data = result.mappings().all()
-            data = [item["channel_id"] for item in data]
+            data = result.scalars().all()
             return data
 
     @classmethod
@@ -72,21 +78,32 @@ class ChannelDAO(BaseDAO):
     @classmethod
     async def search_channel(
         cls,
-        query: str,
+        queries: str | list[str],
         max_result: int = 1,
         order: yt.OrderType = "relevance",
         category_id: int = None,
     ):
-        data = yt.search_list(
-            query=query, type="channel", max_result=max_result, order=order
-        )
-        if data:
-            if category_id:
-                for item in data:
-                    item["category_id"] = category_id
-                    item["status"] = 1
-            await cls.add_update_bulk(data, do_nothing=True)
-        return data
+        if isinstance(queries, str):
+            queries = [queries]
+        for i, query in enumerate(queries, start=1):
+
+            data = yt.search_list(
+                query=query, type="channel", max_result=max_result, order=order
+            )
+            if data:
+                check = "OK" if query == data[0]["channel_title"] else "CHECK"
+                logger.info(
+                    f"{i}/{len(queries)} {query}:{data[0]['channel_title']} {check }"
+                )
+                if category_id:
+                    for item in data:
+                        item["category_id"] = category_id
+                        item["status"] = 1
+                await cls.add_update_bulk(data, do_nothing=True)
+            else:
+                logger.warning(f"{i}/{len(queries)} {query}: NOT FOUND")
+
+        return True
 
     @classmethod
     async def find_by_name(cls, name: str) -> str:
@@ -177,6 +194,20 @@ class ChannelDAO(BaseDAO):
         category_id: int = None,
         date_to: date = date.today(),
     ):
+        #         query = f"""
+        # select
+        #     ch.channel_id, ch.last_video_fetch_dt
+
+        # from channel_stat_change as csc
+        #     left join channel ch on csc.channel_id = ch.channel_id
+        #     left join category as c on ch.category_id = c.id
+        # where total_view_count_change is not null
+        #     and (ch.last_video_fetch_dt  is null or ch.last_video_fetch_dt < '{date_to}')
+        #     and category_id={category_id} and csc.report_period='2025-03-01'
+        # order by csc.report_period desc, c.id, total_view_count_change desc
+        # """
+        #         query = text(query)
+
         query = select(Channel.channel_id, Channel.last_video_fetch_dt).where(
             Channel.status == 1,
             or_(
@@ -187,19 +218,6 @@ class ChannelDAO(BaseDAO):
         if category_id:
             query = query.where(Channel.category_id == category_id)
         query = query.limit(1000).order_by(Channel.last_video_fetch_dt.desc())
-
-        query = f"""select
-    ch.channel_id, ch.last_video_fetch_dt
-    
-from channel_stat_change as csc
-left join channel ch on csc.channel_id = ch.channel_id
-left join category as c on ch.category_id = c.id
-where total_view_count_change is not null
-and (ch.last_video_fetch_dt  is null or ch.last_video_fetch_dt < '{date_to}') 
-and category_id={category_id} and csc.report_period='2025-03-01'
-order by csc.report_period desc, c.category, total_view_count_change desc
-"""
-        query = text(query)
 
         async with async_session_maker() as session:
             result = await session.execute(query)
@@ -232,12 +250,12 @@ order by csc.report_period desc, c.category, total_view_count_change desc
                 date_from = channel["last_video_fetch_dt"] or date_from
                 logger.info(f"{index}/{len(channels)}: {channel_id}")
                 res = await VideoDAO.get_from_playlist(
-                    channel_id, date_from=date_from, max_result=50
+                    channel_id, date_from=date_from, max_result=1000
                 )
                 # ToDo различать ситуации, когда видео нет из-за ошибки или их просто нет
                 await cls.update(
                     {"channel_id": channel_id},
-                    {"last_video_fetch_dt": date_to},
+                    {"last_video_fetch_dt": datetime.now()},
                 )
 
             logger.info(
@@ -248,12 +266,58 @@ order by csc.report_period desc, c.category, total_view_count_change desc
 
     @classmethod
     async def save_thumbnails(cls, filters: dict = {}):
+        async def get_channels():
+            date_from = date(2025, 4, 10)
+            async with async_session_maker() as session:
+                query = select(
+                    Channel.channel_id, Channel.custom_url, Channel.thumbnail_url
+                ).where(and_(Channel.status == 1, Channel.category_id == 7))
+                # Channel.created_at > date_from,
+
+                result = await session.execute(query)
+                data = result.mappings().all()
+                return data
+
         from app.report.tools import save_thumbnails
 
-        if "status" not in filters.keys():
-            filters["status"] = 1
-        channels = await cls.find_all(**filters)
+        channels = await get_channels()
+        logger.info(f"Found {len(channels)} channels")
+        # channels = await cls.find_all(**filters)
+
         return save_thumbnails(channels)
+
+    @classmethod
+    async def get_channels_with_top_videos(cls, category_id: int, priority: int = 100):
+        query = text(
+            """
+            with top_videos as (
+                SELECT
+                    sub.channel_id,
+                    string_agg(title, E'\n' ORDER BY title) AS title_list
+                FROM (
+                    SELECT
+                        channel_id,
+                        title,
+                        ROW_NUMBER() OVER (PARTITION BY channel_id ORDER BY rank DESC) AS rn
+                    FROM video
+                ) sub
+                WHERE rn <= 10
+                GROUP BY channel_id
+            )
+            select
+                c.channel_id, channel_title, description, priority, title_list
+            from channel as c
+            left join top_videos as tv on tv.channel_id = c.channel_id
+            where category_id=:category_id and status=1 and priority <= :priority
+            order by priority
+        """
+        )
+
+        async with async_session_maker() as session:
+            result = await session.execute(
+                query, {"category_id": category_id, "priority": priority}
+            )
+            return result.mappings().all()
 
 
 class ChannelStatDAO(BaseDAO):

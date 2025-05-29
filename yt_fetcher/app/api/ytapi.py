@@ -1,12 +1,16 @@
 import asyncio
+import random
 import time
 
 # import nest_asyncio
 import aiohttp
 from typing import Literal
+from bs4 import BeautifulSoup
 from googleapiclient.discovery import build
 from datetime import datetime, timedelta
 import re
+
+import requests
 
 from app.logger import logger
 from app.config import settings
@@ -190,25 +194,25 @@ def playlistitem_list(
                     continue_cycle = False
                     # break
                     # continue
+                else:
+                    published_period_dt = published_dt.replace(day=1)
+                    url = "https://www.youtube.com/watch?v=" + content.get("videoId")
+                    video = {
+                        "video_id": content.get("videoId"),
+                        "channel_id": snippet.get("channelId"),
+                        "title": snippet.get("title"),
+                        "description": snippet.get("description"),
+                        "published_at": published_dt,
+                        "published_at_period": published_period_dt,
+                        "video_url": url,
+                        "thumbnail_url": snippet.get("thumbnails", {})
+                        .get("high", {})
+                        .get("url"),
+                        #     "channel_title": snippet.get("channelTitle"),
+                        #     "position": snippet.get("position"),
+                    }
 
-                published_period_dt = published_dt.replace(day=1)
-                url = "https://www.youtube.com/watch?v=" + content.get("videoId")
-                video = {
-                    "video_id": content.get("videoId"),
-                    "channel_id": snippet.get("channelId"),
-                    "title": snippet.get("title"),
-                    "description": snippet.get("description"),
-                    "published_at": published_dt,
-                    "published_at_period": published_period_dt,
-                    "video_url": url,
-                    "thumbnail_url": snippet.get("thumbnails", {})
-                    .get("high", {})
-                    .get("url"),
-                    #     "channel_title": snippet.get("channelTitle"),
-                    #     "position": snippet.get("position"),
-                }
-
-                data.append(video)
+                    data.append(video)
 
             next_page_token = response.get("nextPageToken")
             if not next_page_token or len(data) >= max_result:
@@ -349,9 +353,9 @@ def parse_response(response, type: TableType) -> list[dict]:
                 "published_at": published_dt,
                 "custom_url": snippet.get("customUrl", ""),
                 "thumbnail_url": snippet.get("thumbnails", {})["medium"]["url"],
-                "uploads_playlist_id": item.get("contentDetails", {})
-                .get("relatedPlaylists", {})
-                .get("uploads"),
+                # "uploads_playlist_id": item.get("contentDetails", {})
+                # .get("relatedPlaylists", {})
+                # .get("uploads"),
             }
         elif type == "channel_stat":
             val = {
@@ -390,7 +394,86 @@ def parse_response(response, type: TableType) -> list[dict]:
     return data
 
 
-async def check_short(video: dict):
+# working with YT through direct requests, to get info about shorts
+
+
+# result in the list of proxies like ['http://127.0.0.1:9050', 'http://127.0.0.1:9051']
+def find_proxies() -> list[str]:
+    url = "https://free-proxy-list.net/"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        table = soup.find("table", {"class": "table table-striped table-bordered"})
+        proxies = []
+
+        for row in table.find_all("tr")[1:]:
+            columns = row.find_all("td")
+            if len(columns) > 0:
+                ip = columns[0].text.strip()
+                port = columns[1].text.strip()
+                proxy = f"http://{ip}:{port}"
+                proxies.append(proxy)
+
+        logger.info(f"Successfully found {len(proxies)} proxies")
+        return proxies
+    except Exception as e:
+        logger.error(f"Failed to fetch proxies: {str(e)}")
+        return []
+
+
+# Функция для выполнения запросов с п/овторными попытками
+def retry_request(url, params=None, retries=5, delay=5):
+    for attempt in range(retries):
+        proxy = {"http": random.choice(find_proxies())}
+
+        try:
+            response = requests.get(url, params=params, proxies=proxy)
+            response.raise_for_status()
+            logger.debug(f"Request successful with proxy {proxy}")
+            return response
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Request failed with proxy {proxy}: {str(e)}")
+            if attempt < retries - 1:
+                logger.info(
+                    f"Attempt {attempt + 1} of {retries}. Retrying in {delay} seconds..."
+                )
+                time.sleep(delay)
+            else:
+                logger.error("Maximum retry attempts reached. Giving up.")
+                return None
+
+
+# Функция для выполнения запросов с п/овторными попытками
+def choose_proxy(
+    url: str = None, params: dict = None, retries: int = 5, delay: int = 5
+):
+    if not url:
+        url = "https://www.youtube.com"
+    proxies = find_proxies()
+    for attempt in range(retries):
+        choice = random.choice(proxies)
+        proxy = {"http": choice}
+
+        try:
+            response = requests.get(url, params=params, proxies=proxy)
+            response.raise_for_status()
+            logger.debug(f"Request successful with proxy {proxy}")
+            return "http://" + choice
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Request failed with proxy {proxy}: {str(e)}")
+            if attempt < retries - 1:
+                logger.info(
+                    f"Attempt {attempt + 1} of {retries}. Retrying in {delay} seconds..."
+                )
+                time.sleep(delay)
+            else:
+                logger.error("Maximum retry attempts reached. Giving up.")
+                return None
+
+
+async def check_short(video: dict, proxy: str = None):
     video_id = video["video_id"]
     url = f"https://www.youtube.com/shorts/{video_id}"
     async with aiohttp.ClientSession() as session:
@@ -416,10 +499,15 @@ async def limited_gather(sem, tasks):
 
 async def check_shorts(data: list[dict]):
     tasks = []
-    limit = 50
+    limit = 5
+    proxy = None
+    # proxy = choose_proxy()
+    # if not proxy:
+    #     logger.warning(f"No proxy available")
+
     for item in data:
         if item.get("is_short") is None or item.get("is_short") == "":
-            tasks.append(check_short(item))
+            tasks.append(check_short(item, proxy))
 
     # ограничиваем до limit одновременно выполняемых задач
     sem = asyncio.Semaphore(limit)
