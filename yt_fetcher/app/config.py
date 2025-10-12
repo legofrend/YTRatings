@@ -28,6 +28,7 @@ class Settings(BaseSettings):
 
     YT_API_KEY: str
     OAI_API_KEY: str
+    GOOGLE_SHEETS_API_KEY: str
 
     SECRET_KEY: str
     ALGORITHM: str

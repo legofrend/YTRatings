@@ -22,7 +22,7 @@ class QuotaExceededException(Exception):
     pass
 
 
-YT_TIME_REGEX = re.compile(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?")
+YT_TIME_REGEX = re.compile(r"PT(?:(\d+)D)?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?")
 DATETIME_YT_F = "%Y-%m-%dT%H:%M:%SZ"
 DATETIME_YT_F2 = "%Y-%m-%dT%H:%M:%S.%fZ"
 
@@ -66,8 +66,8 @@ def parse_yt_time(s):
     if not m:
         logger.error("invalid string " + s)
         return 0
-    hour, min, sec = (int(g) if g is not None else 0 for g in m.groups())
-    secs = hour * 60 * 60 + min * 60 + sec
+    days, hour, min, sec = (int(g) if g is not None else 0 for g in m.groups())
+    secs = days * 24 * 60 * 60 + hour * 60 * 60 + min * 60 + sec
     return secs
 
 
@@ -259,6 +259,8 @@ def channel_or_video_list(
     data = []
     iter = 0
     step = 50
+    response = None  # Initialize response variable
+
     while iter < len(ids):
         try:
             part_ids = ",".join(ids[iter : (iter + step)])
@@ -277,7 +279,7 @@ def channel_or_video_list(
                     .execute()
                 )
 
-            logger.debug("Get stat", extra={"obj_type": obj_type, "response": response})
+            # logger.debug("Get stat", extra={"obj_type": obj_type, "response": response})
             response["data_dt"] = data_dt
             d = parse_response(response, type=obj_type)
             data.extend(d)
@@ -379,8 +381,8 @@ def parse_response(response, type: TableType) -> list[dict]:
             video_id = item.get("id")
             duration = parse_yt_time(item["contentDetails"].get("duration", ""))
             is_short = (
-                0 if duration > 65 else None
-            )  # Если больше 1 минуты, то точно не short
+                True if duration <= 60 else False if duration > 3 * 60 else None
+            )  # Если меньше минуты - точно шорт, если больше 3 минут - точно не шорт
 
             val = {
                 "video_id": video_id,
@@ -476,30 +478,47 @@ def choose_proxy(
 async def check_short(video: dict, proxy: str = None):
     video_id = video["video_id"]
     url = f"https://www.youtube.com/shorts/{video_id}"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as response:
-            if response.status == 200:
-                video["is_short"] = True  # Это шорт
-            elif response.status == 303:
-                video["is_short"] = False  # Это обычное видео
-                url = f"https://www.youtube.com/watch?v={video_id}"
-            else:
-                logger.error(f"{video_id=}, status={response.status}")
-                video["is_short"] = None  # Не удалось определить
-    # video["is_short"] = is_short
+
+    timeout = aiohttp.ClientTimeout(total=30, connect=10)
+    connector = aiohttp.TCPConnector(limit=100, limit_per_host=5)
+
+    try:
+        async with aiohttp.ClientSession(
+            timeout=timeout, connector=connector
+        ) as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    video["is_short"] = True  # Это шорт
+                elif response.status == 303:
+                    video["is_short"] = False  # Это обычное видео
+                    url = f"https://www.youtube.com/watch?v={video_id}"
+                else:
+                    logger.error(f"{video_id=}, status={response.status}")
+                    video["is_short"] = None  # Не удалось определить
+    except (
+        aiohttp.ClientConnectorError,
+        aiohttp.ClientTimeout,
+        asyncio.TimeoutError,
+    ) as e:
+        logger.warning(f"Connection error for {video_id}: {e}")
+        video["is_short"] = None
+    except Exception as e:
+        logger.error(f"Unexpected error for {video_id}: {e}")
+        video["is_short"] = None
+
     video["video_url"] = url
     return video["is_short"]
 
 
 async def limited_gather(sem, tasks):
     async with sem:
-        time.sleep(0.5)
-        return await asyncio.gather(*tasks)
+        await asyncio.sleep(0.5)  # Заменили time.sleep на asyncio.sleep
+        return await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def check_shorts(data: list[dict]):
     tasks = []
-    limit = 5
+    limit = 3  # Уменьшили с 10 до 3 для снижения нагрузки
     proxy = None
     # proxy = choose_proxy()
     # if not proxy:
@@ -509,13 +528,19 @@ async def check_shorts(data: list[dict]):
         if item.get("is_short") is None or item.get("is_short") == "":
             tasks.append(check_short(item, proxy))
 
+    if not tasks:
+        return []
+
+    logger.info(f"Checking shorts: {len(tasks)}")
+
     # ограничиваем до limit одновременно выполняемых задач
     sem = asyncio.Semaphore(limit)
     results = await asyncio.gather(
         *(
             limited_gather(sem, tasks[i : i + limit])
             for i in range(0, len(tasks), limit)
-        )
+        ),
+        return_exceptions=True,  # Не падаем на ошибках отдельных запросов
     )
 
     return results

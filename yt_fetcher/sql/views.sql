@@ -25,6 +25,7 @@ left join video as v on v.video_id = cur.video_id
 left join video_stat as prev on
         prev.report_period = (cur.report_period - '1 mon'::interval)  -- cur.prev_period
         and prev.video_id=cur.video_id
+WHERE cur.is_short != v.is_short
 )
 UPDATE video_stat AS vs
 SET
@@ -36,13 +37,14 @@ SET
     period_comment_count = u.comment_count
 FROM updates u
 WHERE vs.id = u.id
-    and (vs.period_view_count IS NULL
-       OR vs.period_like_count IS NULL
-       OR vs.period_comment_count IS NULL
-       OR vs.is_short IS NULL
-       OR vs.is_new IS NULL
-       OR vs.channel_id IS NULL
-        )
+  and vs.is_short != u.is_short and vs.data_at<'2025-06-03'
+--     and (vs.period_view_count IS NULL
+--        OR vs.period_like_count IS NULL
+--        OR vs.period_comment_count IS NULL
+--        OR vs.is_short IS NULL
+--        OR vs.is_new IS NULL
+--        OR vs.channel_id IS NULL
+--         )
 ;
 
 -- 2. Update video rank по первому доступному периоду
@@ -69,7 +71,9 @@ UPDATE video v
 SET rank = r.computed_rank
 FROM ranked r
 WHERE v.video_id = r.video_id
-  AND v.rank IS NULL;
+  and v.published_at_period = '2025-05-01'
+--   AND v.rank IS NULL
+;
 
 -- step 3: update channel_stat: calculate channel count change MoM
 with updates AS (
@@ -172,7 +176,8 @@ SET
     pv_score_rank = u.pv_score_rank
 FROM updates as u
 WHERE cs.channel_id = u.channel_id and cs.report_period=u.report_period
-    and cs.pv_view IS NULL
+--     and cs.pv_view IS NULL
+    and cs.report_period='2025-05-01'
 ;
 
 -- step 5: update channel_stat: calculate rank and score change MoM
@@ -194,9 +199,10 @@ SET
     pv_score_rank_change = u.pv_score_rank_change
 FROM updates u
 WHERE cs.id = u.id and cs.ppcs_id>0
+  and cs.report_period='2025-05-01'
 --     and (cs.pv_score_change IS NULL
---         OR cs.pv_score_rank_change IS NULL
-        )
+--         OR cs.pv_score_rank_change IS NULL)
+
 ;
 
 -- step 6: update channel: priority
@@ -433,13 +439,13 @@ left join channel_v as channel on channel.channel_id=v.channel_id
 select ct.id, ct.name,
        count(c.channel_id) as channels,
        sum(case when c.published_at IS NULL then 1 else 0 end) as no_published_date,
-       sum(case when c.last_video_fetch_dt is null or c.last_video_fetch_dt<'2025-04-30' then 1 else 0 end) as not_updated,
+       sum(case when c.last_video_fetch_dt is null or c.last_video_fetch_dt<'2025-09-30' then 1 else 0 end) as not_updated,
        sum(case when cs.id is null  then 1 else 0 end) as no_stat,
        max(case when r.id is null  then 1 else 0 end) as no_report
 from channel as c
 left join category as ct on c.category_id = ct.id
-left join channel_stat cs on c.channel_id = cs.channel_id and cs.report_period='2025-04-01'
-left join report as r on c.category_id = r.category_id and  r.report_period='2025-04-01'
+left join channel_stat cs on c.channel_id = cs.channel_id and cs.report_period='2025-09-01'
+left join report as r on c.category_id = r.category_id and  r.report_period='2025-09-01'
 where c.status= 1 and c.category_id>0 and ct.active=1
 group by 1, 2
 order by 4 desc ;
@@ -453,13 +459,16 @@ select
     count(*) as videos,
     sum(case when v.duration is null then 1 else 0 end) as duration_null,
     sum(case when v.is_short is null then 1 else 0 end) as is_short_null,
-    sum(case when v.published_at_period='2025-04-01'  then 1 else 0 end) as videos_cur_period,
-    sum(case when v.published_at_period='2025-04-01' and vs.id is null then 1 else 0 end) as no_stat_cur_period
+    sum(case when v.published_at_period='2025-09-01'  then 1 else 0 end) as videos_cur_period,
+--     sum(case when v.published_at_period='2025-05-01' and v.duration is null then 1 else 0 end) as cur_duration_null,
+--     sum(case when v.published_at_period='2025-05-01' and v.is_short is null then 1 else 0 end) as cur_is_short_null,
+    sum(case when v.published_at_period='2025-09-01' and vs.id is null then 1 else 0 end) as no_stat_cur_period
 
 from video as v
 left join channel as ch on ch.channel_id=v.channel_id
 left join category c on ch.category_id = c.id
-left join video_stat vs on v.video_id = vs.video_id and vs.report_period='2025-04-01'
+left join video_stat vs on v.video_id = vs.video_id and vs.report_period='2025-09-01'
 where v.status=1 and ch.status=1 and c.active=1
 group by 1, 2
 order by 5 desc, 6 desc, 8 desc;
+

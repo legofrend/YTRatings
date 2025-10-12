@@ -1,4 +1,5 @@
 from datetime import date, datetime, UTC
+from pathlib import Path
 from sqlalchemy import text, select, or_, and_
 
 from app.dao.base import BaseDAO
@@ -11,6 +12,58 @@ import app.api.openaiapi as oai
 from app.channel.video.models import Video, VideoStat
 import csv
 import json
+import pickle
+
+
+def save_data_dump(data: dict, filename_prefix: str = "youtube_data_dump") -> str:
+    """Сохраняет данные в файл для последующего использования"""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # Создаем папку для дампов если её нет
+    dump_dir = Path("data_dumps")
+    dump_dir.mkdir(exist_ok=True)
+
+    # Сохраняем в JSON (читаемо) и pickle (полная структура)
+    json_filename = dump_dir / f"{filename_prefix}_{timestamp}.json"
+    pickle_filename = dump_dir / f"{filename_prefix}_{timestamp}.pkl"
+
+    # JSON для читаемости
+    with open(json_filename, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False, default=str)
+
+    # Pickle для полной структуры данных
+    with open(pickle_filename, "wb") as f:
+        pickle.dump(data, f)
+
+    logger.info(f"✅ Данные сохранены в: {json_filename} и {pickle_filename}")
+
+    return str(pickle_filename)
+
+
+def load_data_dump(filename: str) -> dict:
+    """Загружает данные из дампа"""
+    try:
+        with open(filename, "rb") as f:
+            data = pickle.load(f)
+        logger.info(f"✅ Данные загружены из {filename}")
+        return data
+    except Exception as e:
+        logger.error(f"❌ Ошибка загрузки дампа: {e}")
+        return None
+
+
+def get_latest_dump(dump_prefix: str = "video_list_dump") -> str:
+    """Находит последний дамп по префиксу"""
+    dump_dir = Path("data_dumps")
+    if not dump_dir.exists():
+        return None
+
+    dump_files = list(dump_dir.glob(f"{dump_prefix}_*.pkl"))
+    if not dump_files:
+        return None
+
+    latest_dump = max(dump_files, key=lambda x: x.stat().st_mtime)
+    return str(latest_dump)
 
 
 class VideoDAO(BaseDAO):
@@ -19,9 +72,10 @@ class VideoDAO(BaseDAO):
 
     @classmethod
     async def get_ids(cls, filters: dict = {}):
-        data = await cls.find_all(**filters)
-        ids = [d.video_id for d in data]
-        return ids
+        async with async_session_maker() as session:
+            query = select(cls.model.video_id).filter_by(**filters)
+            result = await session.execute(query)
+            return result.scalars().all()
 
     @classmethod
     async def get_ids_wo_stat(
@@ -31,7 +85,7 @@ class VideoDAO(BaseDAO):
         category_id: int = None,
     ):
         if not published_at_period:
-            published_at_period = report_period.next(-1)
+            published_at_period = report_period.next(-3)
 
         async with async_session_maker() as session:
             query = f"""select distinct v.video_id
@@ -57,11 +111,11 @@ class VideoDAO(BaseDAO):
         async with async_session_maker() as session:
             query = f"""select v.video_id
                         from video as v
-                        where v.status=1 and not is_short and v.published_at_period >= '2025-03-01'
-                        and duration between 60 and 180 and updated_at < '2025-05-02'
+                        where v.status=1 and is_short is null and v.published_at_period >= '2025-05-01'
                     """
-            # if category_id:
-            #     query += f" and c.category_id={category_id}"
+            # and duration between 60 and 180
+            if category_id:
+                query += f" and c.category_id={category_id}"
             query = text(query)
             result = await session.execute(query)
             data = result.mappings().all()
@@ -86,11 +140,14 @@ class VideoDAO(BaseDAO):
             logger.info(f"Fetched videos: {len(video_ids)}")
             if not data:
                 return None
-            # await yt.check_shorts(data)
+            await yt.check_shorts(data)
             await cls.update_bulk(data)
             logger.info(f"Updated videos: {len(data)}")
         except:
             logger.error("Can't update video detail", exc_info=True)
+            dump_file = save_data_dump(data, "video_list_dump")
+            logger.info(f"Data dump saved: {dump_file}")
+
             save_errors(data, "video_detail")
 
         return data
@@ -243,24 +300,56 @@ class VideoStatDAO(BaseDAO):
         cls,
         report_period: Period,
         video_ids: list[str] | str = None,
-        category_id: int = None,
+        category_ids: list[int] | int = None,
     ):
-        if not video_ids:
-            video_ids = await VideoDAO.get_ids_wo_stat(
-                report_period=report_period, category_id=category_id
+        if isinstance(category_ids, int):
+            category_ids = [category_ids]
+
+        # If video_ids provided, use single category_id=0 to skip category filtering
+        if video_ids:
+            category_ids = [0]
+
+        total_updated = 0
+        for i, category_id in enumerate(category_ids, start=1):
+            logger.info(f"Processing category {category_id} {i}/{len(category_ids)}")
+            current_video_ids = (
+                video_ids
+                if video_ids
+                else await VideoDAO.get_ids_wo_stat(
+                    report_period=report_period, category_id=category_id
+                )
             )
-            logger.info(f"Found videos without stat: {len(video_ids)}")
-            if not video_ids:
-                return None
+            logger.info(f"Found videos without stat: {len(current_video_ids)}")
+            if not current_video_ids:
+                continue
 
-        data = yt.video_list(video_ids, obj_type="stat")
-        logger.info(f"Fetched video stats: {len(data)}")
+            data = yt.video_list(current_video_ids, obj_type="stat")
+            # data = []
+            logger.info(f"Fetched video stats: {len(data)}")
 
-        if data:
-            for item in data:
-                item["report_period"] = report_period
-            await cls.add_bulk(data)
-        return data
+            if data:
+                # Check for missing videos
+                returned_ids = {item["video_id"] for item in data}
+                missing_ids = set(current_video_ids) - returned_ids
+                if missing_ids:
+                    logger.warning(f"Missing stats for {len(missing_ids)} videos")
+                    await VideoDAO.update_bulk(
+                        [{"video_id": vid, "status": 0} for vid in missing_ids]
+                    )
+
+                for item in data:
+                    item["report_period"] = report_period
+                await cls.add_bulk(data)
+                total_updated += len(data)
+                if category_id != 0:  # Don't print for single video_ids case
+                    logger.info(
+                        f"{i}: Updated {len(data)} records for category {category_id}"
+                    )
+
+        logger.info(f"Total updated videos: {total_updated}")
+        return total_updated
 
 
 # print("OK")
+
+# save_data_dump({"a": 1, "test": 2}, "video_list_dump")

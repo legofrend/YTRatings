@@ -22,7 +22,7 @@ DATABASE_URL = settings.DATABASE_URL
 async_engine = create_async_engine(
     DATABASE_URL,
     echo=False,
-    connect_args={"command_timeout": 60 * 5},  # таймаут в секундах
+    connect_args={"command_timeout": 60 * 10},  # 10 минут
 )
 async_session_maker = async_sessionmaker(async_engine, expire_on_commit=False)
 

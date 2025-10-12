@@ -1,11 +1,13 @@
 from sqlalchemy import delete, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
+from datetime import datetime, timedelta
 
 from app.database import async_session_maker
 from app.logger import logger, save_errors
 
-LIMIT = 500
+# Оптимальный размер батча для PostgreSQL
+LIMIT = 1000  # Было 500
 
 
 class BaseDAO:
@@ -105,34 +107,101 @@ class BaseDAO:
 
     @classmethod
     async def add_update_bulk(cls, data, do_nothing: bool = False):
-        errors = []
-        add_update = []
-        # print(len(data))
-        for d in data:
-            result = await cls.add_or_update(d, do_nothing)
-            errors.append(d) if result is None else add_update.append(d)
+        if not data:
+            return False
 
-        msg = f"Added or updated to {cls.model.__tablename__} {len(add_update)} records"
-        if errors:
-            save_errors(errors, cls.model.__tablename__)
-            msg += f", {len(errors)} errors"
-            logger.error(msg)
-        else:
-            logger.info(msg)
+        try:
+            # Подготовка данных для пакетного обновления
+            stmt = insert(cls.model).values(data)
 
-        return (add_update, errors)
+            if do_nothing:
+                stmt = stmt.on_conflict_do_nothing(index_elements=[cls.gid])
+                stmt = stmt.returning(cls.model.id)
+            else:
+                # Получаем все колонки кроме gid для обновления
+                update_cols = [
+                    c.name for c in cls.model.__table__.columns if c.name != cls.gid
+                ]
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=[cls.gid],
+                    set_={k: getattr(stmt.excluded, k) for k in update_cols},
+                )
+                # Для do_update используем xmax для определения вставленных/обновленных записей
+                stmt = stmt.returning(cls.model.id, text("xmax"))
+
+            async with async_session_maker() as session:
+                result = await session.execute(stmt)
+                await session.commit()
+
+                if do_nothing:
+                    # В режиме do_nothing возвращаемые id - это вставленные записи
+                    inserted = [row.id for row in result]
+                    skipped = len(data) - len(inserted)
+                    msg = f"Added {len(inserted)} records in {cls.model.__tablename__}"
+                    if skipped > 0:
+                        msg += f", {skipped} skipped"
+                else:
+                    # В режиме do_update используем xmax для определения
+                    inserted = []
+                    updated = []
+                    for row in result:
+                        if row.xmax == 0:
+                            inserted.append(row.id)
+                        else:
+                            updated.append(row.id)
+                    msg = f"Added {len(inserted)} and updated {len(updated)} records in {cls.model.__tablename__}"
+
+                logger.info(msg)
+
+        except Exception as e:
+            logger.error(f"Error in bulk update: {str(e)}")
+            save_errors(data, cls.model.__tablename__)
+            return False
+
+        return True
 
     @classmethod
     async def add_bulk(cls, data: list[dict]) -> list:
         total_result = []
+        start_time = None
+        avg_time_per_batch = None
+
         for i in range(0, len(data), LIMIT):
+            batch_start = datetime.now()
+            if start_time is None:
+                start_time = batch_start
+
             part_data = data[i : (i + LIMIT)]
+
+            # Calculate time estimation
+            if avg_time_per_batch is not None:
+                remaining_batches = (len(data) - i) / LIMIT
+                est_remaining_time = avg_time_per_batch * remaining_batches
+                est_end_time = datetime.now() + timedelta(seconds=est_remaining_time)
+                time_info = f" | Est. remaining: {est_remaining_time:.0f}s | End: {est_end_time.strftime('%H:%M:%S')}"
+            else:
+                time_info = ""
+
+            print(
+                f"\rProcessing {i}/{len(data)} records...{time_info}",
+                end="",
+                flush=True,
+            )
+
             try:
                 async with async_session_maker() as session:
                     query = insert(cls.model).values(part_data).returning(cls.model.id)
                     result = await session.execute(query)
                     await session.commit()
                     total_result.extend(result.mappings().all())
+
+                    # Update average time
+                    batch_time = (datetime.now() - batch_start).total_seconds()
+                    if avg_time_per_batch is None:
+                        avg_time_per_batch = batch_time
+                    else:
+                        avg_time_per_batch = (avg_time_per_batch + batch_time) / 2
+
             except (SQLAlchemyError, Exception) as e:
                 if isinstance(e, SQLAlchemyError):
                     msg = "Database Exc"
@@ -144,47 +213,66 @@ class BaseDAO:
                     msg, extra={"table": cls.model.__tablename__}, exc_info=True
                 )
                 save_errors(data, cls.model.__tablename__)
+
                 # await session.rollback()
-                # return None
+                return False
         return total_result
 
     @classmethod
-    async def update_bulk(cls, data: list[dict], identifier: str = None) -> list:
+    async def update_bulk(cls, data: list[dict], identifier: str = None) -> bool:
+        if not data:
+            return True
+
         identifier = identifier or cls.gid
-        # TODO rewrite without cycle to speed up, it was not easy when id is not in data
         result = True
+
         for i in range(0, len(data), LIMIT):
             part_data = data[i : (i + LIMIT)]
+            print(f"\rProcessing {i}/{len(data)} records...", end="", flush=True)
             try:
                 async with async_session_maker() as session:
-                    for record in part_data:
-                        # Получаем channel_id для обновления
-                        id = record.pop(identifier, None)
-                        if not id:
-                            raise Exception(f"{identifier} is not in data")
-                        query = (
-                            update(cls.model)
-                            .filter_by(**{identifier: id})
-                            .values(record)
-                            .returning(cls.model.id)
-                        )
-                        await session.execute(query)
-                        # result = await session.execute(query)
-                    await session.commit()
-                    # return result.mappings().all()
-                    # return True
+                    # Получаем колонки для обновления (все кроме identifier)
+                    update_cols = [
+                        col for col in part_data[0].keys() if col != identifier
+                    ]
 
-            except (SQLAlchemyError, Exception) as e:
-                if isinstance(e, SQLAlchemyError):
-                    msg = "Database Exc: Cannot update data into table"
-                elif isinstance(e, Exception):
-                    msg = "Unknown Exc: Cannot update data into table"
+                    # Создаем VALUES конструкцию для временной таблицы
+                    # Нужны все колонки, включая identifier, так как они используются в FROM
+                    values = []
+                    for record in part_data:
+                        formatted_values = []
+                        for v in record.values():
+                            if v is None:
+                                formatted_values.append("NULL")
+                            elif isinstance(v, (int, float)):
+                                formatted_values.append(str(v))
+                            else:
+                                formatted_values.append(f"'{v}'")
+                        values.append(f"({', '.join(formatted_values)})")
+
+                    # Формируем SQL запрос
+                    query = text(
+                        f"""
+                        UPDATE {cls.model.__tablename__} t
+                        SET {', '.join(f"{col} = v.{col}" for col in update_cols)}
+                        FROM (VALUES {', '.join(values)}) AS v({', '.join(part_data[0].keys())})
+                        WHERE t.{identifier} = v.{identifier}
+                    """
+                    )
+
+                    await session.execute(query)
+                    await session.commit()
+
+            except Exception as e:
                 logger.error(
-                    msg, extra={"table": cls.model.__tablename__}, exc_info=True
+                    f"Error in bulk update: {str(e)}",
+                    extra={"table": cls.model.__tablename__},
+                    exc_info=True,
                 )
                 save_errors(part_data, cls.model.__tablename__)
-                # return None
                 result = False
+
+            # print("\n")
 
         return result
 

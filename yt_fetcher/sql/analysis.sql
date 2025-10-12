@@ -451,14 +451,36 @@ select * from channel where created_at>'2025-03-21' and created_at<='2025-04-10'
 update video set is_short = True
 where duration <60 and is_short is null;
 
-update video set is_short = True
-where  NOT is_short and status=1 and  duration<180 and published_at_period >= '2025-03-01'
-  and  (lower(title) LIKE '%#short%' or lower(title) LIKE '%#шорт%');
+update video set is_short = False
+where  is_short is TRUE and status=1 and  duration>180 and published_at_period >= '2025-05-01'
+--   and  (lower(title) LIKE '%#short%' or lower(title) LIKE '%#шорт%')
+;
 
-select count(*)
-from video
-where  NOT is_short and status=1 and duration between 60 and 180
-and published_at_period >='2024-03-01'
+update video set status=9
+    where channel_id in (select channel_id from channel where category_id=9);
+
+select
+--     count(*)
+    *
+from video_stat as vs
+left join video as v on v.video_id=vs.video_id
+where v.published_at_period > vs.report_period and v.channel_id='UC3wtD22NT4D2i-CddPJns4Q'
+limit 10;
+
+DELETE FROM video_stat vs
+USING video v
+WHERE v.video_id = vs.video_id
+  AND v.published_at_period > vs.report_period
+  AND v.channel_id = 'UC3wtD22NT4D2i-CddPJns4Q';
+
+select c.category_id, count(*)
+from video as v
+left join channel as c ON v.channel_id=c.channel_id
+where  is_short and v.status=1 and duration > 180
+and v.published_at_period >='2025-05-01'
+and c.status=1
+group by 1
+order by 1
 --   and  (lower(title) LIKE '%short%' or lower(title) LIKE '%шорт%')
 ;
 
@@ -471,7 +493,7 @@ select
     is_short,
     count(v.video_id)
 from video as v
-where v.status=1 and  v.published_at_period >= '2025-03-01'
+where v.status=1 and  v.published_at_period >= '2025-05-01'
 and duration between 60 and 180
 group by 1;
 
@@ -592,7 +614,7 @@ SHOW max_connections;
 
 SELECT column_name, data_type
 FROM information_schema.columns
-WHERE table_name = 'channel_stat';
+WHERE table_name = 'video';
 
 -- -------------------------------------------------------------
 

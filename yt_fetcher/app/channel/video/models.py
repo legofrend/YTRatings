@@ -41,6 +41,7 @@ class Video(Base):
         server_default=func.now(), onupdate=func.now()
     )
     data: Mapped[dict] = mapped_column(JSONB, server_default="{}")
+    rank: Mapped[Optional[int]]
 
 
 class VideoStat(Base):
@@ -56,6 +57,16 @@ class VideoStat(Base):
     prev_period: Mapped[date] = mapped_column(
         Computed("report_period - interval '1 month' ")
     )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(), onupdate=func.now()
+    )
+    period_view_count: Mapped[Optional[int]] = mapped_column(BigInteger)
+    period_like_count: Mapped[Optional[int]] = mapped_column(BigInteger)
+    period_comment_count: Mapped[Optional[int]] = mapped_column(BigInteger)
+    is_short: Mapped[Optional[bool]]
+    is_new: Mapped[Optional[bool]]
+    channel_id: Mapped[str]
 
 
 # print("ok")

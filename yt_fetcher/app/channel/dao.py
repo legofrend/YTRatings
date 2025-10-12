@@ -41,7 +41,7 @@ class ChannelDAO(BaseDAO):
                     ChannelStat,
                     and_(
                         Channel.channel_id == ChannelStat.channel_id,
-                        ChannelStat.report_period == report_period.strf(),
+                        ChannelStat.report_period == report_period,
                     ),
                 )
                 .where(and_(ChannelStat.id.is_(None), Channel.status == 1))
@@ -193,6 +193,7 @@ class ChannelDAO(BaseDAO):
         cls,
         category_id: int = None,
         date_to: date = date.today(),
+        priority: int = 100,
     ):
         #         query = f"""
         # select
@@ -214,6 +215,7 @@ class ChannelDAO(BaseDAO):
                 Channel.last_video_fetch_dt.is_(None),
                 Channel.last_video_fetch_dt < date_to,
             ),
+            Channel.priority <= priority,
         )
         if category_id:
             query = query.where(Channel.category_id == category_id)
@@ -228,38 +230,65 @@ class ChannelDAO(BaseDAO):
     @classmethod
     async def fetch_new_videos(
         cls,
-        category_ids: list[int] | int,
+        category_ids: list[int] | int = None,
+        channel_ids: list[str] | str = None,
         date_from: date = None,
         date_to: date = date.today(),
+        priority: int = 100,
         # period: Period | tuple[datetime, datetime] = Period(),
     ):
-
         if isinstance(category_ids, int):
             category_ids = [category_ids]
+        if channel_ids and category_ids:
+            logger.warning("channel_ids and category_ids can't be used together")
+        if channel_ids:
+            category_ids = [0]
+
         # if isinstance(period, Period):
         #     period = period.as_range()
         # date_from = period
 
         for i, category_id in enumerate(category_ids, start=1):
-            channels = await cls.get_channels_to_fetch_videos(
-                date_to=date_to,
-                category_id=category_id,
+            if channel_ids:
+                channels = [
+                    {"channel_id": channel_id, "last_video_fetch_dt": None}
+                    for channel_id in channel_ids
+                ]
+            else:
+                channels = await cls.get_channels_to_fetch_videos(
+                    date_to=date_to,
+                    category_id=category_id,
+                    priority=priority,
+                )
+            logger.info(
+                f"Category {i}/{len(category_ids)}: {category_id=} {len(channels)} channels"
             )
             for index, channel in enumerate(channels, start=1):
                 channel_id = channel["channel_id"]
                 date_from = channel["last_video_fetch_dt"] or date_from
-                logger.info(f"{index}/{len(channels)}: {channel_id}")
+                # Пропускаем каналы, которые обновлялись сегодня
+                if date_from and date_from.date() == datetime.now().date():
+                    logger.info(
+                        f"{index}/{len(channels)}: {channel_id} - skipped (updated today)"
+                    )
+                    continue
+
+                logger.info(
+                    f"{index}/{len(channels)}: {channel_id}, last fetched {date_from}"
+                )
+                fetch_date = datetime.now()
                 res = await VideoDAO.get_from_playlist(
                     channel_id, date_from=date_from, max_result=1000
                 )
                 # ToDo различать ситуации, когда видео нет из-за ошибки или их просто нет
+                # Сейчас информация last_fetched_video_dt обновится, даже если была ошибка при записи видео в БД
                 await cls.update(
                     {"channel_id": channel_id},
-                    {"last_video_fetch_dt": datetime.now()},
+                    {"last_video_fetch_dt": fetch_date},
                 )
 
             logger.info(
-                f"Category {i}/{len(category_ids)}: Updated {len(channels)} channels"
+                f"Category {i}/{len(category_ids)}: {category_id=}, updated {len(channels)} channels"
             )
 
         return True
@@ -342,4 +371,6 @@ class ChannelStatDAO(BaseDAO):
             for item in data:
                 item["report_period"] = report_period
             await cls.add_bulk(data)
+            logger.info(f"Updated {len(data)} records")
+
         return data
