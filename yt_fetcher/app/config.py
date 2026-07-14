@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     OAI_API_KEY: str
     GOOGLE_SHEETS_API_KEY: str
 
+    # BigQuery (optional until migration; auth via ADC or GOOGLE_APPLICATION_CREDENTIALS)
+    BQ_PROJECT_ID: str | None = None
+    BQ_DATASET: str | None = None
+
     SECRET_KEY: str
     ALGORITHM: str
 
