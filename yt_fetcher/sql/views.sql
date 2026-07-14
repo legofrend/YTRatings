@@ -439,17 +439,18 @@ left join channel_v as channel on channel.channel_id=v.channel_id
 select ct.id, ct.name,
        count(c.channel_id) as channels,
        sum(case when c.published_at IS NULL then 1 else 0 end) as no_published_date,
-       sum(case when c.last_video_fetch_dt is null or c.last_video_fetch_dt<'2025-09-30' then 1 else 0 end) as not_updated,
+       sum(case when c.last_video_fetch_dt is null or c.last_video_fetch_dt<'2026-06-30' then 1 else 0 end) as not_updated,
        sum(case when cs.id is null  then 1 else 0 end) as no_stat,
        max(case when r.id is null  then 1 else 0 end) as no_report
 from channel as c
 left join category as ct on c.category_id = ct.id
-left join channel_stat cs on c.channel_id = cs.channel_id and cs.report_period='2025-09-01'
-left join report as r on c.category_id = r.category_id and  r.report_period='2025-09-01'
+left join channel_stat cs on c.channel_id = cs.channel_id and cs.report_period='2026-06-01'
+left join report as r on c.category_id = r.category_id and  r.report_period='2026-06-01'
 where c.status= 1 and c.category_id>0 and ct.active=1
 group by 1, 2
 order by 4 desc ;
 
+-- select priority, channel_title, last_video_fetch_dt, updated_at from channel where category_id=3 order by priority, last_video_fetch_dt
 
 -- report about videos by categories
 select

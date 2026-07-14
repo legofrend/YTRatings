@@ -6,6 +6,13 @@ const props = defineProps(['video', 'index'])
 const isThumbnailVisible = ref(false)
 const emojiNumbers = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
 
+function formattedDate(dateStr) {
+    const dateObject = new Date(dateStr);
+    const day = String(dateObject.getDate()).padStart(2, '0');
+    const month = String(dateObject.getMonth() + 1).padStart(2, '0');
+    return `${day}.${month}`;
+}
+
 </script>
 
 <template>
@@ -19,7 +26,9 @@ const emojiNumbers = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6�
                     {{ video.title }}
                 </a>
                 <img v-if="isThumbnailVisible" :src="video.thumbnail_url" class="absolute w-80 z-10 left-8" alt="">
-
+            </div>
+            <div v-if="video.published_at" class="text-xs text-gray-500 ml-2">
+                {{ formattedDate(video.published_at) }}
             </div>
         </div>
         <div class="flex ml-5 items-center border-t  border-gray-300">

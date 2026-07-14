@@ -383,9 +383,9 @@ select c.id, c.channel_id, c.channel_title,
        sum(case  when vs.id is null then 1 else 0 end) as no_stat
 from video as v
 left join channel as c on c.channel_id = v.channel_id
-left join video_stat vs on v.video_id = vs.video_id and vs.report_period='2024-11-01'
+left join video_stat vs on v.video_id = vs.video_id and vs.report_period='2026-06-01'
 where c.status=1
-and v.published_at_period>='2024-12-01'
+and v.published_at_period>='2026-06-01'
     and c.category_id=5
 group by 1, 2
 ;
