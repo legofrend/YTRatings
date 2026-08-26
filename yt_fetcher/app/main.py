@@ -28,13 +28,13 @@ async def prepare_monthly_report(
     step: int | float | set[int | float] | frozenset[int | float] = 0,
 ):
     category_id = 1
-    category_ids = list(set(range(4, 19)) - {9})
+    category_ids = list(set(range(1, 19)) - {9})
     # category_ids = [1]
-    period = Period(6, 2026)
-    per_range = [date(2026, 6, 1), date(2026, 7, 1)]
+    period = Period(7, 2026)
+    per_range = [date(2026, 7, 1), date(2026, 8, 1)]
 
     # step = {1}
-    step = {5}
+    step = {2, 3, 4, 5}
 
     ids = """""".split("\n")
 

@@ -18,12 +18,12 @@ fastapi-cache2 = "^0.2.2"
 uvicorn = "^0.32.0"
 google-api-python-client = "^2.138.0"
 google-auth-oauthlib = "^1.2.1"
-google-cloud-bigquery = "^3.27.0"
 openai = "^1.47.0"
 nest-asyncio = "^1.6.0"
 
 
 [tool.poetry.group.dev.dependencies]
+google-cloud-bigquery = "^3.27.0"
 psycopg2 = "^2.9.10"
 pillow = "^11.0.0"
 pandas = "^2.2.2"

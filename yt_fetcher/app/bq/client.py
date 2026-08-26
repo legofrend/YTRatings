@@ -21,7 +21,7 @@ Auth is NOT login/password. Google Cloud uses credentials (identity + permission
        BQ_PROJECT_ID=my-gcp-project
        BQ_DATASET=ytratings
 
-Run:
+Run (requires dev deps: poetry install --with dev):
     poetry run python -m app.bq.client
 """
 
