@@ -60,7 +60,7 @@ Main objects and properties:
 | frontend source | `/var/www/o2t4/backend/YTRatings/frontend/` |
 | frontend dist (live) | `/var/www/o2t4/backend/YTRatings/frontend/dist/` |
 | nginx конфиг | `/etc/nginx/sites-available/ytr` → `sites-enabled/ytr` |
-| backup nginx в репо | `yt_fetcher/ytr.nginx.conf` |
+| backup nginx в репо | `nginx/ytr.nginx.conf` |
 | docker | `ytr_app` (:5001), `o2t4_db` (:5433) из `yt_fetcher/docker-compose.yml` |
 
 ### nginx (сайт ytr)
