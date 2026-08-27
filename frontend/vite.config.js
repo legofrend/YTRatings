@@ -12,5 +12,17 @@ export default defineConfig({
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))
     }
-  }
+  },
+  server: {
+    host: '127.0.0.1',
+    port: 5173,
+    proxy: {
+      // dev: same-origin /api → боевой бэк (без CORS в браузере)
+      '/api': {
+        target: 'https://ytr.o2t4.ru',
+        changeOrigin: true,
+        secure: true,
+      },
+    },
+  },
 })

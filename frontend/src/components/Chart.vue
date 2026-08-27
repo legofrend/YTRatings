@@ -47,7 +47,7 @@ const sortetChannels = computed(() => {
 
         <main>
             <ul v-auto-animate>
-                <li v-for="item in sortetChannels" :key="item.rank">
+                <li v-for="item in sortetChannels" :key="item.channel_id">
                     <ChannelItem :item="item" :scale="props.data.scale" />
                 </li>
             </ul>

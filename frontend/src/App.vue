@@ -171,14 +171,10 @@ async function initialize() {
 }
 
 onMounted(() => {
-  axios.defaults.baseURL = window.location.origin;
-  if (window.location.origin.endsWith(':5173')) {
-    axios.defaults.baseURL = window.location.origin.replace(':5173', ':5000');
-  }
-  // else {
-  //   axios.defaults.baseURL = 'https://ytr.o2t4.ru';
-  // }
-  axios.defaults.baseURL += '/api/ytr/'
+  // always same-origin /api/ytr/:
+  // - prod: nginx → :5001
+  // - dev: vite proxy → https://ytr.o2t4.ru (см. vite.config.js)
+  axios.defaults.baseURL = `${window.location.origin}/api/ytr/`
   console.log('baseURL', axios.defaults.baseURL)
 
   // Установка withCredentials в true для передачи куки
