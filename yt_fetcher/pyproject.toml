@@ -5,26 +5,36 @@ description = ""
 authors = ["legofrend <eremin.oleg@mail.com>"]
 readme = "README.md"
 
+# main = what VPS API Docker needs (always installed)
 [tool.poetry.dependencies]
 python = "^3.12"
 pydantic-settings = "^2.4.0"
 python-json-logger = "^2.0.7"
 sqlalchemy = "^2.0.33"
-lxml = "^5.3.0"
-aiohttp = "^3.10.5"
 asyncpg = "^0.29.0"
+psycopg2 = "^2.9.10"
 fastapi = "^0.115.3"
 fastapi-cache2 = "^0.2.2"
 uvicorn = "^0.32.0"
+
+# monthly pipeline on your PC: poetry install --with ingest
+[tool.poetry.group.ingest]
+optional = true
+
+[tool.poetry.group.ingest.dependencies]
 google-api-python-client = "^2.138.0"
 google-auth-oauthlib = "^1.2.1"
+google-cloud-bigquery = "^3.27.0"
 openai = "^1.47.0"
 nest-asyncio = "^1.6.0"
+aiohttp = "^3.10.5"
+lxml = "^5.3.0"
 
+# notebooks / one-off tools: poetry install --with ingest,dev
+[tool.poetry.group.dev]
+optional = true
 
 [tool.poetry.group.dev.dependencies]
-google-cloud-bigquery = "^3.27.0"
-psycopg2 = "^2.9.10"
 pillow = "^11.0.0"
 pandas = "^2.2.2"
 jupyter = "^1.1.1"

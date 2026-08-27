@@ -6,6 +6,7 @@ from app.dao.base import BaseDAO
 from app.database import async_session_maker
 from app.logger import logger, save_errors, save_json_csv
 from app.period.period import Period
+from app.config import settings
 import app.api.ytapi as yt
 import app.api.openaiapi as oai
 
@@ -13,6 +14,10 @@ from app.channel.video.models import Video, VideoStat
 import csv
 import json
 import pickle
+
+
+def _raw_is_bq() -> bool:
+    return settings.RAW_DB == "bigquery"
 
 
 def save_data_dump(data: dict, filename_prefix: str = "youtube_data_dump") -> str:
@@ -72,10 +77,66 @@ class VideoDAO(BaseDAO):
 
     @classmethod
     async def get_ids(cls, filters: dict = {}):
+        if _raw_is_bq():
+            from app.channel.video.dao_bq import VideoBqDAO
+
+            return await VideoBqDAO.get_ids(filters)
+
         async with async_session_maker() as session:
             query = select(cls.model.video_id).filter_by(**filters)
             result = await session.execute(query)
             return result.scalars().all()
+
+    @classmethod
+    async def add_update_bulk(cls, data, do_nothing: bool = False):
+        if _raw_is_bq():
+            from app.channel.video.dao_bq import VideoBqDAO
+
+            return await VideoBqDAO.add_update_bulk(data, do_nothing=do_nothing)
+        return await super().add_update_bulk(data, do_nothing=do_nothing)
+
+    @classmethod
+    async def update_bulk(cls, data: list[dict], identifier: str = None) -> bool:
+        if _raw_is_bq():
+            from app.channel.video.dao_bq import VideoBqDAO
+
+            return await VideoBqDAO.update_bulk(
+                data, identifier=identifier or cls.gid
+            )
+        return await super().update_bulk(data, identifier=identifier)
+
+    @classmethod
+    async def get_ids_for_stat(
+        cls,
+        report_period: Period,
+        published_at_period: Period = None,
+        category_id: int = None,
+    ):
+        if _raw_is_bq():
+            from app.channel.video.dao_bq import VideoStatBqDAO
+
+            return await VideoStatBqDAO.get_ids_for_stat(
+                report_period=report_period,
+                published_at_period=published_at_period,
+                category_id=category_id,
+            )
+
+        if not published_at_period:
+            published_at_period = report_period.next(-3)
+
+        async with async_session_maker() as session:
+            query = f"""select distinct v.video_id
+                        from video as v
+                        left join channel as c on c.channel_id = v.channel_id
+                        where v.published_at_period >= '{published_at_period.strf()}'
+                        and c.status=1 and v.status=1
+                    """
+            if category_id:
+                query += f" and c.category_id={category_id}"
+            query = text(query)
+            result = await session.execute(query)
+            data = result.mappings().all()
+            return [item["video_id"] for item in data]
 
     @classmethod
     async def get_ids_wo_stat(
@@ -84,6 +145,15 @@ class VideoDAO(BaseDAO):
         published_at_period: Period = None,
         category_id: int = None,
     ):
+        if _raw_is_bq():
+            from app.channel.video.dao_bq import VideoStatBqDAO
+
+            return await VideoStatBqDAO.get_ids_wo_stat(
+                report_period=report_period,
+                published_at_period=published_at_period,
+                category_id=category_id,
+            )
+
         if not published_at_period:
             published_at_period = report_period.next(-3)
 
@@ -108,6 +178,11 @@ class VideoDAO(BaseDAO):
         cls,
         category_id: int = None,
     ):
+        if _raw_is_bq():
+            from app.channel.video.dao_bq import VideoBqDAO
+
+            return await VideoBqDAO.get_ids_wo_is_short(category_id=category_id)
+
         async with async_session_maker() as session:
             query = f"""select v.video_id
                         from video as v
@@ -194,10 +269,13 @@ class VideoDAO(BaseDAO):
         cls,
         id: str,
         date_from: datetime = None,
+        date_to: date | datetime = None,
         max_result: int = 500,
     ):
 
-        videos = yt.playlistitem_list(id, date_from=date_from, max_result=max_result)
+        videos = yt.playlistitem_list(
+            id, date_from=date_from, date_to=date_to, max_result=max_result
+        )
         if videos:
             await cls.add_update_bulk(videos, do_nothing=True)
             return videos
@@ -296,11 +374,21 @@ class VideoStatDAO(BaseDAO):
     model = VideoStat
 
     @classmethod
+    async def add_bulk(cls, data: list[dict]) -> list | bool:
+        if _raw_is_bq():
+            from app.channel.video.dao_bq import VideoStatBqDAO
+
+            return await VideoStatBqDAO.add_bulk(data)
+        return await super().add_bulk(data)
+
+    @classmethod
     async def update_stat(
         cls,
         report_period: Period,
         video_ids: list[str] | str = None,
         category_ids: list[int] | int = None,
+        *,
+        force: bool = False,
     ):
         if isinstance(category_ids, int):
             category_ids = [category_ids]
@@ -315,11 +403,18 @@ class VideoStatDAO(BaseDAO):
             current_video_ids = (
                 video_ids
                 if video_ids
-                else await VideoDAO.get_ids_wo_stat(
-                    report_period=report_period, category_id=category_id
+                else await (
+                    cls.get_ids_for_stat(
+                        report_period=report_period, category_id=category_id
+                    )
+                    if force
+                    else cls.get_ids_wo_stat(
+                        report_period=report_period, category_id=category_id
+                    )
                 )
             )
-            logger.info(f"Found videos without stat: {len(current_video_ids)}")
+            label = "videos" if force else "videos without stat"
+            logger.info(f"Found {len(current_video_ids)} {label}")
             if not current_video_ids:
                 continue
 
@@ -333,13 +428,24 @@ class VideoStatDAO(BaseDAO):
                 missing_ids = set(current_video_ids) - returned_ids
                 if missing_ids:
                     logger.warning(f"Missing stats for {len(missing_ids)} videos")
-                    await VideoDAO.update_bulk(
-                        [{"video_id": vid, "status": 0} for vid in missing_ids]
-                    )
+                    missing_payload = [
+                        {"video_id": vid, "status": 0} for vid in missing_ids
+                    ]
+                    if _raw_is_bq():
+                        from app.channel.video.dao_bq import VideoBqDAO
+
+                        await VideoBqDAO.update_bulk(missing_payload)
+                    else:
+                        await VideoDAO.update_bulk(missing_payload)
 
                 for item in data:
                     item["report_period"] = report_period
-                await cls.add_bulk(data)
+                if _raw_is_bq():
+                    from app.channel.video.dao_bq import VideoStatBqDAO
+
+                    await VideoStatBqDAO.add_bulk(data)
+                else:
+                    await cls.add_bulk(data)
                 total_updated += len(data)
                 if category_id != 0:  # Don't print for single video_ids case
                     logger.info(

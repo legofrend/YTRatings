@@ -9,6 +9,7 @@ from app.dao.base import BaseDAO
 from app.database import async_session_maker
 from app.logger import logger, save_errors
 from app.period import Period
+from app.config import settings
 
 from app.report.models import Report
 from app.report.schemas import SMetaData, SReport
@@ -22,6 +23,10 @@ from app.channel import (
     SVideo,
     SVideoStat,
 )
+
+
+def _raw_is_bq() -> bool:
+    return settings.RAW_DB == "bigquery"
 
 
 async def select_view(view_name: str, filters: dict = {}, conditions: list[str] = None):
@@ -102,9 +107,35 @@ class ReportDAO(BaseDAO):
         return channels
 
     @classmethod
+    async def build_in_bq(cls, period: Period, category_ids: int | list[int]):
+        from app.report.dao_bq import ReportBqDAO
+
+        return await ReportBqDAO.build_in_bq(period, category_ids)
+
+    @classmethod
+    async def sync_from_bq(
+        cls,
+        period: Period | list,
+        category_ids: int | list[int],
+    ):
+        from app.report.dao_bq import ReportBqDAO
+
+        return await ReportBqDAO.sync_from_bq(period, category_ids)
+
+    @classmethod
     async def build(cls, period: Period, category_ids: int):
         if isinstance(category_ids, int):
             category_ids = [category_ids]
+
+        if _raw_is_bq():
+            # Convenience: SQL materialize in BQ, then push selected rows to PG.
+            # Prefer explicit build_in_bq / sync_from_bq in main for split runs.
+            ok = await cls.build_in_bq(period, category_ids)
+            if not ok:
+                return None
+            n = await cls.sync_from_bq(period, category_ids)
+            return True if n else None
+
         for i, category_id in enumerate(category_ids, start=1):
             logger.info(f"{i}/{len(category_ids)}: category {category_id}")
             logger.debug("Getting data from view")

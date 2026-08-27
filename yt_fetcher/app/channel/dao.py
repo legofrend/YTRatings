@@ -10,9 +10,21 @@ from app.database import async_session_maker
 from app.logger import logger, save_errors
 from app.channel.models import Channel, ChannelStat
 from app.channel.video.dao import VideoDAO
+from app.config import settings
 from app.period import Period
 
 import app.api.ytapi as yt
+
+
+def _raw_is_bq() -> bool:
+    return settings.RAW_DB == "bigquery"
+
+
+def _naive_utc(dt: datetime) -> datetime:
+    """BQ TIMESTAMP is tz-aware; PG/YouTube datetimes are naive UTC."""
+    if dt.tzinfo is not None:
+        return dt.astimezone(UTC).replace(tzinfo=None)
+    return dt
 
 
 class ChannelDAO(BaseDAO):
@@ -21,6 +33,11 @@ class ChannelDAO(BaseDAO):
 
     @classmethod
     async def get_ids(cls, filters: dict = {}):
+        if _raw_is_bq():
+            from app.channel.dao_bq import ChannelBqDAO
+
+            return await ChannelBqDAO.get_ids(filters)
+
         # if not "status" in filters.keys():
         #     filters["status"] = 1
         data = await cls.find_all(**filters)
@@ -28,11 +45,33 @@ class ChannelDAO(BaseDAO):
         return ids
 
     @classmethod
+    async def add_update_bulk(cls, data, do_nothing: bool = False):
+        if _raw_is_bq():
+            from app.channel.dao_bq import ChannelBqDAO
+
+            return await ChannelBqDAO.add_update_bulk(data, do_nothing=do_nothing)
+        return await super().add_update_bulk(data, do_nothing=do_nothing)
+
+    @classmethod
+    async def update(cls, filter: dict, data: dict):
+        if _raw_is_bq():
+            from app.channel.dao_bq import ChannelBqDAO
+
+            return await ChannelBqDAO.update(filter, data)
+        return await super().update(filter, data)
+
+    @classmethod
     async def get_ids_wo_stat(
         cls,
         report_period: Period,
         category_id: int = None,
     ):
+        if _raw_is_bq():
+            from app.channel.dao_bq import ChannelStatBqDAO
+
+            return await ChannelStatBqDAO.get_ids_wo_stat(
+                report_period=report_period, category_id=category_id
+            )
 
         async with async_session_maker() as session:
             query = (
@@ -61,6 +100,13 @@ class ChannelDAO(BaseDAO):
         report_period: Period,
         category_id: int = None,
     ):
+        if _raw_is_bq():
+            from app.channel.dao_bq import ChannelBqDAO
+
+            return await ChannelBqDAO.get_ids_wo_video(
+                report_period=report_period, category_id=category_id
+            )
+
         # TODO replace with alchemy query
         query = f"""select c.channel_id
                     from channel as c
@@ -195,6 +241,13 @@ class ChannelDAO(BaseDAO):
         date_to: date = date.today(),
         priority: int = 100,
     ):
+        if _raw_is_bq():
+            from app.channel.dao_bq import ChannelBqDAO
+
+            return await ChannelBqDAO.get_channels_to_fetch_videos(
+                category_id=category_id, date_to=date_to, priority=priority
+            )
+
         #         query = f"""
         # select
         #     ch.channel_id, ch.last_video_fetch_dt
@@ -233,7 +286,7 @@ class ChannelDAO(BaseDAO):
         category_ids: list[int] | int = None,
         channel_ids: list[str] | str = None,
         date_from: date = None,
-        date_to: date = date.today(),
+        date_to: date = None,
         priority: int = 100,
         # period: Period | tuple[datetime, datetime] = Period(),
     ):
@@ -244,9 +297,10 @@ class ChannelDAO(BaseDAO):
         if channel_ids:
             category_ids = [0]
 
-        # if isinstance(period, Period):
-        #     period = period.as_range()
-        # date_from = period
+        # Exclusive end of report window (1st of next month). Channels / videos
+        # beyond this belong to the next period.
+        date_to = date_to or date.today()
+        period_end = datetime.combine(date_to, datetime.min.time())
 
         for i, category_id in enumerate(category_ids, start=1):
             if channel_ids:
@@ -266,25 +320,37 @@ class ChannelDAO(BaseDAO):
             for index, channel in enumerate(channels, start=1):
                 channel_id = channel["channel_id"]
                 date_from = channel["last_video_fetch_dt"] or date_from
-                # Пропускаем каналы, которые обновлялись сегодня
-                if date_from and date_from.date() == datetime.now().date():
+                if isinstance(date_from, datetime):
+                    date_from = _naive_utc(date_from)
+                # Already caught up through period end
+                if isinstance(date_from, datetime):
+                    if date_from >= period_end:
+                        logger.info(
+                            f"{index}/{len(channels)}: {channel_id} - skipped (up to date)"
+                        )
+                        continue
+                elif isinstance(date_from, date) and date_from >= date_to:
                     logger.info(
-                        f"{index}/{len(channels)}: {channel_id} - skipped (updated today)"
+                        f"{index}/{len(channels)}: {channel_id} - skipped (up to date)"
                     )
                     continue
 
                 logger.info(
                     f"{index}/{len(channels)}: {channel_id}, last fetched {date_from}"
                 )
-                fetch_date = datetime.now()
+                # Don't claim Sept videos if we only ingested through Aug 31
+                fetch_marker = min(datetime.now(), period_end)
                 res = await VideoDAO.get_from_playlist(
-                    channel_id, date_from=date_from, max_result=1000
+                    channel_id,
+                    date_from=date_from,
+                    date_to=date_to,
+                    max_result=1000,
                 )
                 # ToDo различать ситуации, когда видео нет из-за ошибки или их просто нет
                 # Сейчас информация last_fetched_video_dt обновится, даже если была ошибка при записи видео в БД
                 await cls.update(
                     {"channel_id": channel_id},
-                    {"last_video_fetch_dt": fetch_date},
+                    {"last_video_fetch_dt": fetch_marker},
                 )
 
             logger.info(
@@ -353,24 +419,73 @@ class ChannelStatDAO(BaseDAO):
     model = ChannelStat
 
     @classmethod
+    async def add_bulk(cls, data: list[dict]) -> list | bool:
+        if _raw_is_bq():
+            from app.channel.dao_bq import ChannelStatBqDAO
+
+            return await ChannelStatBqDAO.add_bulk(data)
+        return await super().add_bulk(data)
+
+    @classmethod
     async def update_stat(
         cls,
         report_period: Period,
         channel_ids: list[str] | str = None,
-        category_id: int = None,
+        category_ids: list[int] | int | None = None,
+        *,
+        force: bool = False,
     ):
-        if not channel_ids:
-            channel_ids = await ChannelDAO.get_ids_wo_stat(
-                report_period=report_period, category_id=category_id
+        if isinstance(category_ids, int):
+            category_ids = [category_ids]
+
+        if channel_ids:
+            category_ids = [None]
+
+        if not category_ids:
+            category_ids = [None]
+
+        total_updated = 0
+        for i, category_id in enumerate(category_ids, start=1):
+            if category_id is not None:
+                logger.info(
+                    f"Processing category {category_id} {i}/{len(category_ids)}"
+                )
+            current_channel_ids = (
+                channel_ids
+                if channel_ids
+                else await (
+                    ChannelDAO.get_ids(
+                        {"status": 1, **({"category_id": category_id} if category_id is not None else {})}
+                    )
+                    if force
+                    else ChannelDAO.get_ids_wo_stat(
+                        report_period=report_period, category_id=category_id
+                    )
+                )
             )
-            logger.info(f"Found {len(channel_ids)} channels wo stat")
+            label = "channels" if force else "channels wo stat"
+            logger.info(f"Found {len(current_channel_ids)} {label}")
+            if not current_channel_ids:
+                continue
 
-        data = yt.channel_list(channel_ids, obj_type="stat")
+            data = yt.channel_list(current_channel_ids, obj_type="stat")
 
-        if data:
-            for item in data:
-                item["report_period"] = report_period
-            await cls.add_bulk(data)
-            logger.info(f"Updated {len(data)} records")
+            if data:
+                for item in data:
+                    item["report_period"] = report_period
+                if _raw_is_bq():
+                    from app.channel.dao_bq import ChannelStatBqDAO
 
-        return data
+                    await ChannelStatBqDAO.add_bulk(data)
+                else:
+                    await cls.add_bulk(data)
+                total_updated += len(data)
+                if category_id is not None:
+                    logger.info(
+                        f"{i}: Updated {len(data)} records for category {category_id}"
+                    )
+                else:
+                    logger.info(f"Updated {len(data)} records")
+
+        logger.info(f"Total updated channels: {total_updated}")
+        return total_updated

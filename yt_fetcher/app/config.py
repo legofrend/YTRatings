@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     # BigQuery (optional until migration; auth via ADC or GOOGLE_APPLICATION_CREDENTIALS)
     BQ_PROJECT_ID: str | None = None
     BQ_DATASET: str | None = None
+    # Prefer service-account JSON key for stable scripts (path outside repo).
+    # If set, used instead of user ADC from `gcloud auth application-default login`.
+    GOOGLE_APPLICATION_CREDENTIALS: str | None = None
+    # Where raw ingest (channel/video/stat) is written. report/FastAPI stay on Postgres.
+    RAW_DB: Literal["postgres", "bigquery"] = "postgres"
 
     SECRET_KEY: str
     ALGORITHM: str

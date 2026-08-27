@@ -7,7 +7,7 @@ import aiohttp
 from typing import Literal
 from bs4 import BeautifulSoup
 from googleapiclient.discovery import build
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import re
 
 import requests
@@ -153,10 +153,14 @@ def search_list(
 
 
 def playlistitem_list(
-    playlist_id: str, date_from: datetime = None, max_result: int = 500
+    playlist_id: str,
+    date_from: datetime = None,
+    date_to: datetime | date | None = None,
+    max_result: int = 500,
 ) -> list[dict]:
     """
-    Get all videos from playlist published after date_from
+    Get videos from playlist with published_at in [date_from, date_to).
+    Playlist is newest-first; stop when items fall below date_from.
     """
     global IS_QUOTA_EXCEEDED
     if IS_QUOTA_EXCEEDED:
@@ -164,6 +168,9 @@ def playlistitem_list(
 
     if playlist_id.startswith("UC"):
         playlist_id = "UU" + playlist_id[2:]
+
+    if isinstance(date_to, date) and not isinstance(date_to, datetime):
+        date_to = datetime.combine(date_to, datetime.min.time())
 
     params = {
         "part": "snippet,contentDetails",
@@ -189,13 +196,17 @@ def playlistitem_list(
 
                 published_dt = ytfmt2dt(snippet.get("publishedAt"))
 
+                if date_to and published_dt >= date_to:
+                    # Too new for this report window — skip, keep paging
+                    continue
+
                 if date_from and published_dt < date_from:
-                    # Если мы достигли старых видео, предполагаем что дальше будут еще более старые
+                    # Reached older-than-window; rest of playlist is older
                     continue_cycle = False
                     # break
                     # continue
                 else:
-                    published_period_dt = published_dt.replace(day=1)
+                    published_period_dt = published_dt.replace(day=1).date()
                     url = "https://www.youtube.com/watch?v=" + content.get("videoId")
                     video = {
                         "video_id": content.get("videoId"),
@@ -326,7 +337,7 @@ def parse_response(response, type: TableType) -> list[dict]:
         stat = item.get("statistics")
         if snippet and snippet.get("publishedAt"):
             published_dt = ytfmt2dt(snippet.get("publishedAt"))
-            published_period_dt = published_dt.replace(day=1)
+            published_period_dt = published_dt.replace(day=1).date()
 
         if type == "video":
             url = "https://www.youtube.com/watch?v=" + item["id"]["videoId"]

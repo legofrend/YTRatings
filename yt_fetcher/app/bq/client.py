@@ -21,7 +21,7 @@ Auth is NOT login/password. Google Cloud uses credentials (identity + permission
        BQ_PROJECT_ID=my-gcp-project
        BQ_DATASET=ytratings
 
-Run (requires dev deps: poetry install --with dev):
+Run (requires ingest deps: poetry install --with ingest):
     poetry run python -m app.bq.client
 """
 
@@ -30,6 +30,7 @@ from __future__ import annotations
 import os
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 from google.api_core import exceptions as gcp_exceptions
 from google.auth.exceptions import DefaultCredentialsError
@@ -59,6 +60,18 @@ class BqTestResult:
     hint: str | None = None
 
 
+def _project_root() -> Path:
+    # app/bq/client.py → yt_fetcher/
+    return Path(__file__).resolve().parents[2]
+
+
+def _resolve_creds_path(path: str) -> str:
+    p = Path(path)
+    if not p.is_absolute():
+        p = _project_root() / p
+    return str(p.resolve())
+
+
 def _resolve_project_id(explicit: str | None = None) -> str | None:
     return (
         explicit
@@ -70,7 +83,12 @@ def _resolve_project_id(explicit: str | None = None) -> str | None:
 
 
 def describe_auth(project_id: str | None = None) -> BqAuthInfo:
-    creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    creds_path = (
+        os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+        or settings.GOOGLE_APPLICATION_CREDENTIALS
+    )
+    if creds_path:
+        creds_path = _resolve_creds_path(creds_path)
     resolved_project = _resolve_project_id(project_id)
 
     if creds_path:
@@ -99,9 +117,14 @@ def describe_auth(project_id: str | None = None) -> BqAuthInfo:
 
 def get_client(project_id: str | None = None) -> bigquery.Client:
     resolved_project = _resolve_project_id(project_id)
-    creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-
+    creds_path = (
+        os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+        or settings.GOOGLE_APPLICATION_CREDENTIALS
+    )
     if creds_path:
+        creds_path = _resolve_creds_path(creds_path)
+        # So nested Google libs / child procs see the absolute path.
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
         if not os.path.isfile(creds_path):
             raise FileNotFoundError(
                 f"GOOGLE_APPLICATION_CREDENTIALS points to missing file: {creds_path}"
