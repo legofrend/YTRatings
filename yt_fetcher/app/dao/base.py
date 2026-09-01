@@ -1,13 +1,29 @@
 from sqlalchemy import delete, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from app.database import async_session_maker
 from app.logger import logger, save_errors
 
 # Оптимальный размер батча для PostgreSQL
 LIMIT = 1000  # Было 500
+
+
+def _format_sql_literal(value) -> str:
+    if value is None:
+        return "NULL"
+    # bool before int — bool is a subclass of int in Python
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, datetime):
+        return f"'{value.isoformat()}'"
+    if isinstance(value, date):
+        return f"'{value.isoformat()}'"
+    s = str(value).replace("'", "''")
+    return f"'{s}'"
 
 
 class BaseDAO:
@@ -238,16 +254,12 @@ class BaseDAO:
 
                     # Создаем VALUES конструкцию для временной таблицы
                     # Нужны все колонки, включая identifier, так как они используются в FROM
+                    cols = list(part_data[0].keys())
                     values = []
                     for record in part_data:
-                        formatted_values = []
-                        for v in record.values():
-                            if v is None:
-                                formatted_values.append("NULL")
-                            elif isinstance(v, (int, float)):
-                                formatted_values.append(str(v))
-                            else:
-                                formatted_values.append(f"'{v}'")
+                        formatted_values = [
+                            _format_sql_literal(record.get(k)) for k in cols
+                        ]
                         values.append(f"({', '.join(formatted_values)})")
 
                     # Формируем SQL запрос
@@ -255,7 +267,7 @@ class BaseDAO:
                         f"""
                         UPDATE {cls.model.__tablename__} t
                         SET {', '.join(f"{col} = v.{col}" for col in update_cols)}
-                        FROM (VALUES {', '.join(values)}) AS v({', '.join(part_data[0].keys())})
+                        FROM (VALUES {', '.join(values)}) AS v({', '.join(cols)})
                         WHERE t.{identifier} = v.{identifier}
                     """
                     )

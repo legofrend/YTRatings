@@ -161,6 +161,55 @@ class ReportDAO(BaseDAO):
         return True
 
     @classmethod
+    async def refresh_channel_report(cls) -> dict:
+        """Materialize report_view → public.channel_report (drop/recreate + indexes)."""
+        statements = [
+            "DROP TABLE IF EXISTS channel_report",
+            "CREATE TABLE channel_report AS SELECT * FROM report_view",
+            """
+            CREATE INDEX idx_channel_report_cat_period_rank
+              ON channel_report (category_id, report_period, rank)
+            """,
+            """
+            CREATE INDEX idx_channel_report_channel_period
+              ON channel_report (channel_id, report_period)
+            """,
+            """
+            CREATE INDEX idx_channel_report_period
+              ON channel_report (report_period)
+            """,
+            "ANALYZE channel_report",
+        ]
+        async with async_session_maker() as session:
+            for stmt in statements:
+                await session.execute(text(stmt))
+            await session.commit()
+
+            stats = await session.execute(
+                text(
+                    """
+                    SELECT
+                      pg_size_pretty(pg_total_relation_size('channel_report')) AS size,
+                      COUNT(*) AS rows,
+                      COUNT(DISTINCT channel_id) AS channels,
+                      COUNT(DISTINCT category_id) AS categories,
+                      MIN(report_period) AS period_from,
+                      MAX(report_period) AS period_to
+                    FROM channel_report
+                    """
+                )
+            )
+            row = dict(stats.mappings().one())
+
+        logger.info(
+            "channel_report refreshed: "
+            f"size={row['size']} rows={row['rows']} "
+            f"channels={row['channels']} cats={row['categories']} "
+            f"periods={row['period_from']}..{row['period_to']}"
+        )
+        return row
+
+    @classmethod
     async def get(cls, period: Period | date | str, category_id: int):
         if isinstance(period, (str)):
             period = Period.parse(period)

@@ -198,7 +198,7 @@ class VideoDAO(BaseDAO):
             return data
 
     @classmethod
-    async def update_detail(cls, video_ids: list[str] | str = None):
+    async def update_detail(cls, video_ids: list[str] | str = None, *, skip_shorts: bool = False):
         if not video_ids:
             video_ids = await cls.get_ids(
                 filters={
@@ -215,9 +215,15 @@ class VideoDAO(BaseDAO):
             logger.info(f"Fetched videos: {len(video_ids)}")
             if not data:
                 return None
-            await yt.check_shorts(data)
-            await cls.update_bulk(data)
-            logger.info(f"Updated videos: {len(data)}")
+            if not skip_shorts:
+                await yt.check_shorts(data)
+            ok = await cls.update_bulk(data)
+            if ok:
+                logger.info(f"Updated videos: {len(data)}")
+            else:
+                logger.error(
+                    f"Partial/failed bulk update for {len(data)} videos; see logs/*_video_errors_.csv"
+                )
         except:
             logger.error("Can't update video detail", exc_info=True)
             dump_file = save_data_dump(data, "video_list_dump")
@@ -237,7 +243,14 @@ class VideoDAO(BaseDAO):
                         file, delimiter="\t"
                     )  # используем табуляцию как разделитель
                     video_list = [
-                        {"video_id": row["video_id"], "is_short": None}
+                        {
+                            "video_id": row["video_id"],
+                            "is_short": (
+                                row["is_short"].strip().lower() == "true"
+                                if row.get("is_short") and str(row["is_short"]).strip()
+                                else None
+                            ),
+                        }
                         for row in csv_reader
                     ]
             else:
@@ -257,7 +270,11 @@ class VideoDAO(BaseDAO):
                 with open(filename, "w", encoding="utf-8") as file:
                     file.write(str(video_list))
 
-            await cls.update_bulk(video_list)
+            ok = await cls.update_bulk(video_list)
+            if not ok:
+                logger.error(
+                    f"Partial/failed is_short bulk update for {len(video_list)} videos"
+                )
         except:
             logger.error("Can't update video detail", exc_info=True)
             save_errors(video_list, "video_detail")
@@ -404,11 +421,11 @@ class VideoStatDAO(BaseDAO):
                 video_ids
                 if video_ids
                 else await (
-                    cls.get_ids_for_stat(
+                    VideoDAO.get_ids_for_stat(
                         report_period=report_period, category_id=category_id
                     )
                     if force
-                    else cls.get_ids_wo_stat(
+                    else VideoDAO.get_ids_wo_stat(
                         report_period=report_period, category_id=category_id
                     )
                 )

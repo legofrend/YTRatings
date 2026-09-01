@@ -1,5 +1,6 @@
 import asyncio
 import random
+import sys
 import time
 
 # import nest_asyncio
@@ -22,7 +23,9 @@ class QuotaExceededException(Exception):
     pass
 
 
-YT_TIME_REGEX = re.compile(r"PT(?:(\d+)D)?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?")
+YT_TIME_REGEX = re.compile(
+    r"^P(?:\d+D)?(?:T(?:\d+H)?(?:\d+M)?(?:\d+S)?)?$"
+)
 DATETIME_YT_F = "%Y-%m-%dT%H:%M:%SZ"
 DATETIME_YT_F2 = "%Y-%m-%dT%H:%M:%S.%fZ"
 
@@ -60,15 +63,18 @@ def parse_yt_time(s):
         return 0
     if not isinstance(s, str):
         return int(s)
-    if s == "P0D":
+    if s in ("P0D", "PT0S"):
         return 0
-    m = YT_TIME_REGEX.match(s)
-    if not m:
+    if not YT_TIME_REGEX.match(s):
         logger.error("invalid string " + s)
         return 0
-    days, hour, min, sec = (int(g) if g is not None else 0 for g in m.groups())
-    secs = days * 24 * 60 * 60 + hour * 60 * 60 + min * 60 + sec
-    return secs
+
+    def _n(unit: str) -> int:
+        m = re.search(rf"(\d+){unit}", s)
+        return int(m.group(1)) if m else 0
+
+    days, hour, min, sec = _n("D"), _n("H"), _n("M"), _n("S")
+    return days * 86400 + hour * 3600 + min * 60 + sec
 
 
 def search_list(
@@ -527,6 +533,28 @@ async def limited_gather(sem, tasks):
         return await asyncio.gather(*tasks, return_exceptions=True)
 
 
+def _fmt_eta(seconds: float) -> str:
+    if seconds <= 0:
+        return "?"
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    m, s = divmod(seconds, 60)
+    if m < 60:
+        return f"{m}m{s:02d}s"
+    h, m = divmod(m, 60)
+    return f"{h}h{m:02d}m"
+
+
+def _print_shorts_progress(done: int, total: int, start: float) -> None:
+    elapsed = time.monotonic() - start
+    pct = 100.0 * done / total if total else 100.0
+    eta = (elapsed / done * (total - done)) if done > 0 else 0
+    msg = f"Checking shorts: {done}/{total} ({pct:.1f}%) ETA {_fmt_eta(eta)}"
+    sys.stdout.write(f"\r{msg:<72}")
+    sys.stdout.flush()
+
+
 async def check_shorts(data: list[dict]):
     tasks = []
     limit = 3  # Уменьшили с 10 до 3 для снижения нагрузки
@@ -542,17 +570,33 @@ async def check_shorts(data: list[dict]):
     if not tasks:
         return []
 
-    logger.info(f"Checking shorts: {len(tasks)}")
+    total = len(tasks)
+    logger.info(f"Checking shorts: {total}")
 
-    # ограничиваем до limit одновременно выполняемых задач
     sem = asyncio.Semaphore(limit)
-    results = await asyncio.gather(
-        *(
-            limited_gather(sem, tasks[i : i + limit])
-            for i in range(0, len(tasks), limit)
-        ),
-        return_exceptions=True,  # Не падаем на ошибках отдельных запросов
-    )
+    chunk_size = limit * 10  # progress every ~30 videos
+    results: list = []
+    start = time.monotonic()
+    for chunk_start in range(0, total, chunk_size):
+        chunk = tasks[chunk_start : chunk_start + chunk_size]
+        chunk_results = await asyncio.gather(
+            *(
+                limited_gather(sem, chunk[i : i + limit])
+                for i in range(0, len(chunk), limit)
+            ),
+            return_exceptions=True,
+        )
+        results.extend(chunk_results)
+        done = min(chunk_start + chunk_size, total)
+        _print_shorts_progress(done, total, start)
+
+    if total:
+        _print_shorts_progress(total, total, start)
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+        logger.info(
+            f"Checking shorts done: {total} in {_fmt_eta(time.monotonic() - start)}"
+        )
 
     return results
 

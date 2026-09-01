@@ -12,6 +12,7 @@ from starlette.requests import Request
 
 from app.logger import logger
 from app.report.dao import ReportDAO
+from app.fast_api.v2 import router as ytr_v2_router
 from contextlib import asynccontextmanager
 
 
@@ -58,6 +59,8 @@ app.add_middleware(
         "Authorization",
     ],
 )
+
+app.include_router(ytr_v2_router)
 
 
 # Эндпоинт для отдачи страницы index.html при заходе на домен

@@ -6,6 +6,7 @@ Commands:
   videos        — fetch new videos + detail/is_short (anytime; resume via DB holes)
   video-stat    — video_stat by category (near midnight after channel-stat; cat 1 first)
   publish       — build report in BQ + sync to PG
+  channel-report — materialize report_view → channel_report table in PG
 
 Examples:
   python -m app.main channel-stat --cats 1
@@ -13,8 +14,10 @@ Examples:
   python -m app.main videos
   python -m app.main video-stat --force
   python -m app.main publish
+  python -m app.main channel-report
   python -m app.main channel-stat video-stat --period 2026-07
   python -m app.main videos --cats 1 --priority 50
+  python -m app.main videos --cats 1 --skip-shorts
 """
 
 from __future__ import annotations
@@ -114,6 +117,7 @@ async def cmd_videos(
     category_ids: list[int],
     *,
     priority: int,
+    skip_shorts: bool = False,
 ) -> None:
     # Exclusive end of report month (e.g. Aug → 2026-09-01). Videos on/after
     # this date belong to the next period.
@@ -128,9 +132,12 @@ async def cmd_videos(
         priority=priority,
     )
     logger.info("videos detail (duration / missing fields)")
-    await VideoDAO.update_detail()
-    logger.info("videos is_short")
-    await VideoDAO.update_is_short()
+    await VideoDAO.update_detail(skip_shorts=skip_shorts)
+    if skip_shorts:
+        logger.info("videos is_short skipped (--skip-shorts)")
+    else:
+        logger.info("videos is_short")
+        await VideoDAO.update_is_short()
 
 
 async def cmd_video_stat(
@@ -149,11 +156,17 @@ async def cmd_publish(period: Period, category_ids: list[int]) -> None:
     await ReportDAO.sync_from_bq(period, category_ids)
 
 
+async def cmd_channel_report() -> None:
+    logger.info("channel-report: materialize report_view → channel_report")
+    await ReportDAO.refresh_channel_report()
+
+
 COMMANDS = {
     "channel-stat": cmd_channel_stat,
     "videos": cmd_videos,
     "video-stat": cmd_video_stat,
     "publish": cmd_publish,
+    "channel-report": cmd_channel_report,
 }
 
 
@@ -166,7 +179,7 @@ def build_parser() -> argparse.ArgumentParser:
         "commands",
         nargs="*",
         choices=list(COMMANDS),
-        help="one or more: channel-stat | videos | video-stat | publish",
+        help="one or more: channel-stat | videos | video-stat | publish | channel-report",
     )
     p.add_argument(
         "--period",
@@ -188,6 +201,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--force",
         action="store_true",
         help="channel-stat / video-stat: refresh all rows (upsert), not only missing",
+    )
+    p.add_argument(
+        "--skip-shorts",
+        action="store_true",
+        help="videos: skip HTTP is_short checks (update_detail + update_is_short)",
     )
     return p
 
@@ -229,13 +247,20 @@ async def _run_parsed(args: argparse.Namespace) -> None:
     for name in args.commands:
         logger.info(f"=== {name} ===")
         if name == "videos":
-            await cmd_videos(period, category_ids, priority=args.priority)
+            await cmd_videos(
+                period,
+                category_ids,
+                priority=args.priority,
+                skip_shorts=args.skip_shorts,
+            )
         elif name == "channel-stat":
             await cmd_channel_stat(period, category_ids, force=args.force)
         elif name == "video-stat":
             await cmd_video_stat(period, category_ids, force=args.force)
         elif name == "publish":
             await cmd_publish(period, category_ids)
+        elif name == "channel-report":
+            await cmd_channel_report()
         else:
             raise SystemExit(f"unknown command: {name}")
 
