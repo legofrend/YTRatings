@@ -47,10 +47,10 @@ from app.channel import (
     CategoryDAO,
     ChannelDAO,
     ChannelStatDAO,
-    PlaylistShortsDAO,
     VideoDAO,
     VideoStatDAO,
 )
+from app.channel.playlist_shorts.dao import PlaylistShortsDAO
 from app.logger import logger
 from app.period import Period
 from app.report.dao import ReportDAO

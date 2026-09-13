@@ -13,7 +13,7 @@ from app.channel.video.dao import VideoDAO
 from app.config import settings
 from app.period import Period
 
-import app.api.ytapi as yt
+# ytapi is imported lazily inside YouTube-calling methods (FastAPI image has no ingest deps)
 
 
 def _raw_is_bq() -> bool:
@@ -126,9 +126,11 @@ class ChannelDAO(BaseDAO):
         cls,
         queries: str | list[str],
         max_result: int = 1,
-        order: yt.OrderType = "relevance",
+        order: str = "relevance",
         category_id: int = None,
     ):
+        import app.api.ytapi as yt
+
         if isinstance(queries, str):
             queries = [queries]
         for i, query in enumerate(queries, start=1):
@@ -178,6 +180,8 @@ class ChannelDAO(BaseDAO):
         category_id: int = None,
         do_nothing: bool = False,
     ):
+        import app.api.ytapi as yt
+
         if not channel_ids:
             if category_id:
                 filters = {
@@ -204,10 +208,11 @@ class ChannelDAO(BaseDAO):
         date_from: datetime = datetime.now(),
         iterations: int = 8,
         date_step: int = 7,
-        order: yt.OrderType = "relevance",
-        type: yt.ResourseType = "video",
+        order: str = "relevance",
+        type: str = "video",
         max_result: int = 50,
     ):
+        import app.api.ytapi as yt
 
         data = []
         for _ in range(0, iterations):
@@ -627,6 +632,8 @@ class ChannelStatDAO(BaseDAO):
             logger.info(f"Found {len(current_channel_ids)} {label}")
             if not current_channel_ids:
                 continue
+
+            import app.api.ytapi as yt
 
             data = yt.channel_list(current_channel_ids, obj_type="stat")
 

@@ -9,8 +9,8 @@ from app.database import async_session_maker
 from app.logger import logger, save_errors, save_json_csv
 from app.period.period import Period
 from app.config import settings
-import app.api.ytapi as yt
-import app.api.openaiapi as oai
+
+# ytapi / openaiapi imported lazily inside methods that need them (FastAPI image stays slim)
 
 from app.channel.video.models import Video, VideoStat
 import csv
@@ -201,6 +201,8 @@ class VideoDAO(BaseDAO):
 
     @classmethod
     async def update_detail(cls, video_ids: list[str] | str = None, *, skip_shorts: bool = False):
+        import app.api.ytapi as yt
+
         if not video_ids:
             video_ids = await cls.get_ids(
                 filters={
@@ -327,6 +329,7 @@ class VideoDAO(BaseDAO):
 
     @classmethod
     async def update_is_short(cls, video_list: list[str] = None, from_file: str = None):
+        import app.api.ytapi as yt
 
         if not video_list:
             if from_file:
@@ -381,6 +384,7 @@ class VideoDAO(BaseDAO):
         date_to: date | datetime = None,
         max_result: int = 500,
     ):
+        import app.api.ytapi as yt
 
         videos = yt.playlistitem_list(
             id, date_from=date_from, date_to=date_to, max_result=max_result
@@ -396,6 +400,8 @@ class VideoDAO(BaseDAO):
         channel_id: str,
         period: Period | tuple[datetime, datetime] = Period(),
     ):
+        import app.api.ytapi as yt
+
         if isinstance(period, Period):
             period = period.as_range()
 
@@ -444,6 +450,8 @@ class VideoDAO(BaseDAO):
 
     @classmethod
     async def eval_clickbait(cls, filters: dict = {}):
+        import app.api.openaiapi as oai
+
         LIMIT = 50
         instructions = """Ты на вход получишь данные с video_id и заголовком видео, разделенных табом. Для каждого заголовка тебе нужно определить, является ли он кликбейт и почему (clickbait_comment). Кликбейт — это термин, описывающий веб-контент, целью которого является получение дохода от онлайн-рекламы, особенно в ущерб качеству или точности информации. Пожалуйста, выведи только массив объектов в JSON формате:
 
@@ -751,6 +759,8 @@ class VideoStatDAO(BaseDAO):
             logger.info(f"Found {len(current_video_ids)} {label}")
             if not current_video_ids:
                 continue
+
+            import app.api.ytapi as yt
 
             data = yt.video_list(current_video_ids, obj_type="stat")
             # data = []

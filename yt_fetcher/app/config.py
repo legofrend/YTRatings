@@ -28,7 +28,7 @@ class Settings(BaseSettings):
 
     YT_API_KEY: str
     OAI_API_KEY: str
-    GOOGLE_SHEETS_API_KEY: str
+    GOOGLE_SHEETS_API_KEY: str = ""
 
     # BigQuery (optional until migration; auth via ADC or GOOGLE_APPLICATION_CREDENTIALS)
     BQ_PROJECT_ID: str | None = None
