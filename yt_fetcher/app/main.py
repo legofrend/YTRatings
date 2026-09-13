@@ -4,20 +4,30 @@ Monthly pipeline CLI.
 Commands:
   channel-stat  — channel_stat by category (do near midnight 1st; fastest, time-sensitive)
   videos        — fetch new videos + detail/is_short (anytime; resume via DB holes)
-  video-stat    — video_stat by category (near midnight after channel-stat; cat 1 first)
-  publish       — build report in BQ + sync to PG
+  video-stat    — video_stat by category (near midnight after channel-stat; order=sort_order)
+  publish       — build report JSON (PG SQL upsert, or BQ+sync if RAW_DB=bigquery)
   channel-report — materialize report_view → channel_report table in PG
+  shorts-sync   — fetch UUSH playlist into playlist_shorts (API quota)
+  apply-is-short — set video.is_short from playlist_shorts (--cats / --channel-id optional)
+  backfill-denorm — fill NULL video_stat denorm cols (channel_id/is_short/is_new/period_*)
+  backfill-channel-denorm — fill channel_stat denorm (pc_*/pv_*/ppcs_id/ranks) from video_stat
 
 Examples:
   python -m app.main channel-stat --cats 1
   python -m app.main channel-stat --cats 1 --force
   python -m app.main videos
   python -m app.main video-stat --force
-  python -m app.main publish
+  python -m app.main publish --period 2026-08 --cats 1
   python -m app.main channel-report
   python -m app.main channel-stat video-stat --period 2026-07
   python -m app.main videos --cats 1 --priority 50
   python -m app.main videos --cats 1 --skip-shorts
+  python -m app.main shorts-sync --period 2026-08 --cats 1 --channel-id UCxxxxxxxx
+  python -m app.main apply-is-short --channel-id UCxxxxxxxx
+  python -m app.main apply-is-short --cats 1
+  python -m app.main backfill-denorm --period 2026-08
+  python -m app.main backfill-denorm --period 2025-05 --period-to 2026-07
+  python -m app.main backfill-channel-denorm --period 2025-05 --period-to 2026-08
 """
 
 from __future__ import annotations
@@ -37,6 +47,7 @@ from app.channel import (
     CategoryDAO,
     ChannelDAO,
     ChannelStatDAO,
+    PlaylistShortsDAO,
     VideoDAO,
     VideoStatDAO,
 )
@@ -89,10 +100,8 @@ async def resolve_category_ids(cats: list[int] | None) -> list[int]:
         return cats
     rows = await CategoryDAO.find_all(active=1)
     rows = list(rows)
-    # category 1 first (quota), then sort_order, then id
     rows.sort(
         key=lambda r: (
-            0 if r["id"] == 1 else 1,
             r["sort_order"] if r["sort_order"] is not None else 1000,
             r["id"],
         )
@@ -150,15 +159,125 @@ async def cmd_video_stat(
 
 
 async def cmd_publish(period: Period, category_ids: list[int]) -> None:
-    logger.info(f"publish build_in_bq period={period} cats={category_ids}")
-    await ReportDAO.build_in_bq(period, category_ids)
-    logger.info(f"publish sync_from_bq period={period} cats={category_ids}")
-    await ReportDAO.sync_from_bq(period, category_ids)
+    from app.config import settings
+
+    if settings.RAW_DB == "bigquery":
+        logger.info(f"publish build_in_bq period={period} cats={category_ids}")
+        await ReportDAO.build_in_bq(period, category_ids)
+        logger.info(f"publish sync_from_bq period={period} cats={category_ids}")
+        await ReportDAO.sync_from_bq(period, category_ids)
+    else:
+        logger.info(f"publish build_in_pg period={period} cats={category_ids}")
+        ok = await ReportDAO.build_in_pg(period, category_ids)
+        if not ok:
+            raise SystemExit("publish build_in_pg failed")
 
 
 async def cmd_channel_report() -> None:
     logger.info("channel-report: materialize report_view → channel_report")
     await ReportDAO.refresh_channel_report()
+
+
+async def cmd_shorts_sync(
+    period: Period,
+    category_ids: list[int],
+    *,
+    priority: int,
+    channel_id: str | None = None,
+) -> None:
+    date_from = datetime.combine(period, datetime.min.time())
+    date_to = datetime.combine(period.next(1), datetime.min.time())
+    channel_ids = [channel_id] if channel_id else None
+    logger.info(
+        f"shorts-sync period={period} window=[{date_from} .. {date_to}) "
+        f"cats={category_ids} channel_id={channel_id}"
+    )
+    await PlaylistShortsDAO.sync_channels(
+        category_ids=category_ids,
+        date_from=date_from,
+        date_to=date_to,
+        channel_ids=channel_ids,
+        priority=priority,
+    )
+
+
+async def cmd_apply_is_short(
+    *,
+    category_ids: list[int] | None = None,
+    channel_id: str | None = None,
+) -> None:
+    """Set video.is_short from playlist_shorts. Window = first short .. last_shorts_fetch_dt."""
+    channel_ids = [channel_id] if channel_id else None
+    logger.info(
+        f"apply-is-short cats={category_ids} channel_id={channel_id}"
+    )
+
+    orphans = await PlaylistShortsDAO.find_orphans_not_in_video(
+        category_ids=category_ids,
+        channel_ids=channel_ids,
+    )
+    if orphans["count"]:
+        logger.warning(
+            f"orphans playlist_shorts not in video: {orphans['count']}; "
+            f"sample={orphans['sample'][:5]}"
+        )
+    else:
+        logger.info("orphans check: 0 (all playlist_shorts present in video)")
+
+    stats = await VideoDAO.update_is_short_new(
+        category_ids=category_ids,
+        channel_ids=channel_ids,
+        only_null=True,
+    )
+    logger.info(f"apply-is-short done: {stats}")
+
+
+def _period_range(start: Period, end: Period) -> list[Period]:
+    if end < start:
+        start, end = end, start
+    out: list[Period] = []
+    p = start
+    while p <= end:
+        out.append(p)
+        p = p.next(1)
+    return out
+
+
+async def cmd_backfill_denorm(
+    period_from: Period,
+    period_to: Period | None = None,
+    *,
+    batch_size: int = 10_000,
+) -> None:
+    """Fill video_stat denorm NULLs for one period or inclusive --period-to range."""
+    periods = _period_range(period_from, period_to or period_from)
+    logger.info(
+        f"backfill-denorm periods={[p.strf('%p') for p in periods]} "
+        f"batch_size={batch_size}"
+    )
+    for i, p in enumerate(periods, start=1):
+        logger.info(f"=== backfill-denorm {p.strf('%p')} ({i}/{len(periods)}) ===")
+        n = await VideoStatDAO.backfill_denorm(
+            report_period=p, batch_size=batch_size
+        )
+        logger.info(f"backfill-denorm {p.strf('%p')}: updated {n}")
+
+
+async def cmd_backfill_channel_denorm(
+    period_from: Period,
+    period_to: Period | None = None,
+) -> None:
+    """Fill channel_stat denorm for one period or inclusive --period-to range."""
+    periods = _period_range(period_from, period_to or period_from)
+    logger.info(
+        f"backfill-channel-denorm periods={[p.strf('%p') for p in periods]}"
+    )
+    for i, p in enumerate(periods, start=1):
+        logger.info(
+            f"=== backfill-channel-denorm {p.strf('%p')} ({i}/{len(periods)}) ==="
+        )
+        stats = await ChannelStatDAO.backfill_denorm(report_period=p)
+        logger.info(f"backfill-channel-denorm {p.strf('%p')}: {stats}")
 
 
 COMMANDS = {
@@ -167,6 +286,10 @@ COMMANDS = {
     "video-stat": cmd_video_stat,
     "publish": cmd_publish,
     "channel-report": cmd_channel_report,
+    "shorts-sync": cmd_shorts_sync,
+    "apply-is-short": cmd_apply_is_short,
+    "backfill-denorm": cmd_backfill_denorm,
+    "backfill-channel-denorm": cmd_backfill_channel_denorm,
 }
 
 
@@ -179,7 +302,7 @@ def build_parser() -> argparse.ArgumentParser:
         "commands",
         nargs="*",
         choices=list(COMMANDS),
-        help="one or more: channel-stat | videos | video-stat | publish | channel-report",
+        help="one or more: channel-stat | videos | video-stat | publish | channel-report | shorts-sync | apply-is-short | backfill-denorm | backfill-channel-denorm",
     )
     p.add_argument(
         "--period",
@@ -187,9 +310,20 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"YYYY-MM or YYYY-MM-DD (default: prev month if day<{PERIOD_ROLLOVER_DAY}, else current)",
     )
     p.add_argument(
+        "--period-to",
+        default=None,
+        help="backfill-denorm: inclusive end period YYYY-MM (with --period as start)",
+    )
+    p.add_argument(
+        "--batch-size",
+        type=int,
+        default=10_000,
+        help="backfill-denorm: rows per UPDATE batch (default 10000)",
+    )
+    p.add_argument(
         "--cats",
         default=None,
-        help="category ids, e.g. 1,3,5-8 (default: all active, id=1 first)",
+        help="category ids, e.g. 1,3,5-8 (default: all active by sort_order)",
     )
     p.add_argument(
         "--priority",
@@ -206,6 +340,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--skip-shorts",
         action="store_true",
         help="videos: skip HTTP is_short checks (update_detail + update_is_short)",
+    )
+    p.add_argument(
+        "--channel-id",
+        default=None,
+        help="shorts-sync / apply-is-short: single channel_id (UC…). optional for apply-is-short",
     )
     return p
 
@@ -261,6 +400,35 @@ async def _run_parsed(args: argparse.Namespace) -> None:
             await cmd_publish(period, category_ids)
         elif name == "channel-report":
             await cmd_channel_report()
+        elif name == "shorts-sync":
+            await cmd_shorts_sync(
+                period,
+                category_ids,
+                priority=args.priority,
+                channel_id=args.channel_id,
+            )
+        elif name == "apply-is-short":
+            # None when --cats omitted → all synced channels; else only listed cats
+            cats = parse_cats(args.cats)
+            await cmd_apply_is_short(
+                category_ids=cats,
+                channel_id=args.channel_id,
+            )
+        elif name == "backfill-denorm":
+            if not args.period:
+                raise SystemExit("backfill-denorm requires --period")
+            await cmd_backfill_denorm(
+                Period.parse(args.period),
+                Period.parse(args.period_to) if args.period_to else None,
+                batch_size=args.batch_size,
+            )
+        elif name == "backfill-channel-denorm":
+            if not args.period:
+                raise SystemExit("backfill-channel-denorm requires --period")
+            await cmd_backfill_channel_denorm(
+                Period.parse(args.period),
+                Period.parse(args.period_to) if args.period_to else None,
+            )
         else:
             raise SystemExit(f"unknown command: {name}")
 

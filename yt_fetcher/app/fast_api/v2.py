@@ -1,141 +1,105 @@
-"""YTRatings API v2 — channel-grain friendly endpoints.
-
-Backed by the existing report blob for now; later swap to channel-level tables.
-"""
+"""YTRatings API v2 — channel_stat / video_stat backed endpoints."""
 
 from __future__ import annotations
 
-from copy import deepcopy
-from typing import Any
-
 from fastapi import APIRouter, HTTPException, Query
 
-from app.report.dao import ReportDAO
+from app.channel import CategoryDAO, ChannelStatDAO, VideoStatDAO
+from app.period import Period
 
 router = APIRouter(prefix="/ytr/v2", tags=["ytr-v2"])
 
 
-@router.get("/report")
-async def get_report_v2(
-    period: str,
-    category_id: int,
-    limit: int = Query(10, ge=1, le=100, description="How many channels to return"),
+@router.get("/categories")
+async def list_categories():
+    """Active categories: id, name, sort_order."""
+    return await CategoryDAO.list_active()
+
+
+@router.get("/periods")
+async def list_periods(category_id: int = Query(..., description="Category id")):
+    """Periods that have ranked channel_stat for the category (newest first)."""
+    periods = await ChannelStatDAO.periods_for_category(category_id)
+    if not periods:
+        raise HTTPException(status_code=404, detail="No periods for category")
+    return {
+        "category_id": category_id,
+        "periods": [p.isoformat() for p in periods],
+    }
+
+
+@router.get("/channels")
+async def list_channels(
+    category_id: int = Query(..., description="Category id"),
+    period: str | None = Query(
+        None, description="Report period YYYY-MM-DD; default = latest available"
+    ),
+    limit: int = Query(20, ge=1, le=100, description="Top N channels"),
 ):
-    """Same shape as /ytr/report, but truncated and without top_videos payloads."""
-    report = await ReportDAO.get(period, category_id)
-    if not report:
-        raise HTTPException(status_code=404, detail="Report not found")
+    """Top channels for category+period from channel_stat JOIN channel."""
+    if period:
+        report_period = Period.parse(period)
+    else:
+        latest = await ChannelStatDAO.latest_period(category_id)
+        if not latest:
+            raise HTTPException(status_code=404, detail="No data for category")
+        report_period = Period.parse(str(latest))
 
-    data = deepcopy(report["data"][:limit])
-    for ch in data:
-        ch["top_videos"] = []
+    channels = await ChannelStatDAO.top_channels(
+        category_id=category_id,
+        report_period=report_period,
+        limit=limit,
+    )
+    if not channels:
+        raise HTTPException(status_code=404, detail="No channels for category/period")
 
-    return {**report, "data": data, "limit": limit}
+    return {
+        "category_id": category_id,
+        "period": report_period.strf(),
+        "limit": limit,
+        "channels": channels,
+    }
 
 
 @router.get("/videos")
-async def get_channel_videos_v2(
-    period: str,
-    channel_id: str,
-    limit: int = Query(5, ge=1, le=50, description="Top N videos for the channel"),
+async def list_videos(
+    channel_id: str = Query(..., description="YouTube channel id"),
+    period: str = Query(..., description="Report period YYYY-MM-DD"),
+    limit: int = Query(10, ge=1, le=50, description="Top N videos"),
 ):
-    """Top videos for one channel in a period (lazy-load on expand)."""
-    meta = await ReportDAO.metadata()
-    channel = None
-    report_period = None
-
-    for cat in meta:
-        report = await ReportDAO.get(period, cat.id)
-        if not report:
-            continue
-        channel = next(
-            (c for c in report["data"] if c.get("channel_id") == channel_id),
-            None,
-        )
-        if channel:
-            report_period = report["period"]
-            break
-
-    if not channel:
-        raise HTTPException(status_code=404, detail="Channel not found in period")
-
-    videos = list(channel.get("top_videos") or [])[:limit]
+    """Top new videos for channel+period from video_stat JOIN video."""
+    report_period = Period.parse(period)
+    videos = await VideoStatDAO.top_for_channel(
+        channel_id=channel_id,
+        report_period=report_period,
+        limit=limit,
+    )
     return {
-        "period": report_period,
         "channel_id": channel_id,
+        "period": report_period.strf(),
         "limit": limit,
         "videos": videos,
     }
 
 
 @router.get("/channel")
-async def get_channel_history_v2(
-    channel_id: str,
-    period_from: str | None = Query(
-        None, description="Inclusive start period YYYY-MM-DD; default = last 12 months"
-    ),
-    period_to: str | None = Query(
-        None, description="Inclusive end period YYYY-MM-DD; default = latest available"
-    ),
+async def channel_dynamics(
+    channel_id: str = Query(..., description="YouTube channel id"),
+    months: int = Query(12, ge=1, le=60, description="How many latest months"),
 ):
-    """Channel metrics over time. Default window: last 12 months from latest data."""
-    from app.period import Period
-
-    meta = await ReportDAO.metadata()
-    points: list[dict[str, Any]] = []
-    channel_meta: dict[str, Any] | None = None
-
-    # Collect all appearances across categories/periods (channel belongs to one category).
-    for cat in meta:
-        for period in cat.periods:
-            period_str = period.isoformat() if hasattr(period, "isoformat") else str(period)
-            report = await ReportDAO.get(period_str, cat.id)
-            if not report:
-                continue
-            ch = next(
-                (c for c in report["data"] if c.get("channel_id") == channel_id),
-                None,
-            )
-            if not ch:
-                continue
-
-            if channel_meta is None:
-                channel_meta = {
-                    "channel_id": ch.get("channel_id"),
-                    "channel_title": ch.get("channel_title"),
-                    "custom_url": ch.get("custom_url"),
-                    "thumbnail_url": ch.get("thumbnail_url"),
-                    "category_id": cat.id,
-                }
-
-            points.append(
-                {
-                    "period": report["period"],
-                    "rank": ch.get("rank"),
-                    "rank_change": ch.get("rank_change"),
-                    "stat": ch.get("stat"),
-                }
-            )
-
-    if not points:
+    """Channel rank + view-index (pv_score) over the last M months."""
+    data = await ChannelStatDAO.channel_dynamics(
+        channel_id=channel_id,
+        months=months,
+    )
+    if not data or not data["points"]:
         raise HTTPException(status_code=404, detail="No history for channel")
 
-    def _as_period(value: str | Any) -> Period:
-        return Period.parse(str(value))
-
-    points.sort(key=lambda p: _as_period(p["period"]))
-    latest = _as_period(points[-1]["period"])
-
-    end = _as_period(period_to) if period_to else latest
-    start = _as_period(period_from) if period_from else end.next(-11)
-
-    filtered = [p for p in points if start <= _as_period(p["period"]) <= end]
-    if not filtered:
-        raise HTTPException(status_code=404, detail="No history in requested period range")
-
+    points = data["points"]
     return {
-        "channel": channel_meta,
-        "period_from": start.strf(),
-        "period_to": end.strf(),
-        "points": filtered,
+        "channel": data["channel"],
+        "months": months,
+        "period_from": points[0]["report_period"],
+        "period_to": points[-1]["report_period"],
+        "points": points,
     }

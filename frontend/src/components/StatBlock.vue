@@ -66,8 +66,6 @@ function formatTime(seconds, full = false) {
 
 <template>
     <div class="flex flex-auto space-x-1 md:space-x-2 items-baseline text-sm">
-        <data-block type="views" :value="ValDisplay(stat.total_view_count_change)" :value-change="0"
-            title="Общее количество просмотров на канале за период"></data-block>
         <data-block type="score" :value="ValDisplay(stat.score)" :value-change="stat.score_change"
             :title="scoreTitle"></data-block>
         <data-block type="subscribers" :value="ValDisplay(stat.subscriber_count)"

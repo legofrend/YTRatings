@@ -31,6 +31,7 @@ class Channel(Base):
 
     published_at: Mapped[Optional[datetime]]
     last_video_fetch_dt: Mapped[Optional[datetime]]
+    last_shorts_fetch_dt: Mapped[Optional[datetime]]
 
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

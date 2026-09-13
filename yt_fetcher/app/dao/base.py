@@ -1,4 +1,4 @@
-from sqlalchemy import delete, select, text, update
+from sqlalchemy import delete, select, text, update, literal_column, Boolean
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
 from datetime import date, datetime, timedelta
@@ -134,16 +134,20 @@ class BaseDAO:
                 stmt = stmt.on_conflict_do_nothing(index_elements=[cls.gid])
                 stmt = stmt.returning(cls.model.id)
             else:
-                # Получаем все колонки кроме gid для обновления
+                pk_names = {c.name for c in cls.model.__table__.primary_key.columns}
                 update_cols = [
-                    c.name for c in cls.model.__table__.columns if c.name != cls.gid
+                    c.name
+                    for c in cls.model.__table__.columns
+                    if c.name != cls.gid and c.name not in pk_names
                 ]
                 stmt = stmt.on_conflict_do_update(
                     index_elements=[cls.gid],
                     set_={k: getattr(stmt.excluded, k) for k in update_cols},
                 )
-                # Для do_update используем xmax для определения вставленных/обновленных записей
-                stmt = stmt.returning(cls.model.id, text("xmax"))
+                stmt = stmt.returning(
+                    cls.model.id,
+                    literal_column("(xmax = 0)", type_=Boolean).label("inserted"),
+                )
 
             async with async_session_maker() as session:
                 result = await session.execute(stmt)
@@ -157,14 +161,13 @@ class BaseDAO:
                     if skipped > 0:
                         msg += f", {skipped} skipped"
                 else:
-                    # В режиме do_update используем xmax для определения
                     inserted = []
                     updated = []
-                    for row in result:
-                        if row.xmax == 0:
-                            inserted.append(row.id)
+                    for row in result.mappings():
+                        if row["inserted"]:
+                            inserted.append(row["id"])
                         else:
-                            updated.append(row.id)
+                            updated.append(row["id"])
                     msg = f"Added {len(inserted)} and updated {len(updated)} records in {cls.model.__tablename__}"
 
                 logger.info(msg)

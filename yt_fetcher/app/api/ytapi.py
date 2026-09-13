@@ -32,6 +32,7 @@ DATETIME_YT_F2 = "%Y-%m-%dT%H:%M:%S.%fZ"
 IS_QUOTA_EXCEEDED = False
 
 OrderType = Literal["date", "rating", "relevance", "title", "videoCount", "viewCount"]
+PlaylistKind = Literal["uploads", "shorts"]
 # videoCount – Channels are sorted in descending order of their number of uploaded videos.
 # viewCount – Resources are sorted from highest to lowest number of views. For live broadcasts, videos are sorted by number of concurrent viewers while the broadcasts are ongoing.
 ResourseType = Literal["video", "channel", "playlist"]
@@ -56,6 +57,14 @@ def ytfmt2dt(dt_str: str) -> datetime | None:
         logger.error(f"Invalid datetime string: {dt_str}")
         return None
     return dt
+
+
+def channel_to_playlist_id(channel_id: str, playlist_kind: PlaylistKind = "uploads") -> str:
+    """UC… → UU… (uploads) or UUSH… (shorts). Pass-through if already a playlist id."""
+    if channel_id.startswith("UC"):
+        prefix = "UUSH" if playlist_kind == "shorts" else "UU"
+        return prefix + channel_id[2:]
+    return channel_id
 
 
 def parse_yt_time(s):
@@ -163,17 +172,19 @@ def playlistitem_list(
     date_from: datetime = None,
     date_to: datetime | date | None = None,
     max_result: int = 500,
+    playlist_kind: PlaylistKind = "uploads",
 ) -> list[dict]:
     """
     Get videos from playlist with published_at in [date_from, date_to).
     Playlist is newest-first; stop when items fall below date_from.
+    playlist_kind: uploads (UU…) or shorts (UUSH…) when playlist_id is a channel id (UC…).
     """
     global IS_QUOTA_EXCEEDED
     if IS_QUOTA_EXCEEDED:
         raise QuotaExceededException("YouTube API quota exceeded")
 
     if playlist_id.startswith("UC"):
-        playlist_id = "UU" + playlist_id[2:]
+        playlist_id = channel_to_playlist_id(playlist_id, playlist_kind)
 
     if isinstance(date_to, date) and not isinstance(date_to, datetime):
         date_to = datetime.combine(date_to, datetime.min.time())
@@ -236,6 +247,12 @@ def playlistitem_list(
                 break
 
         except HttpError as e:
+            if e.resp.status == 404:
+                logger.warning(
+                    "Playlist not found (empty or missing)",
+                    extra={"playlist_id": playlist_id, "playlist_kind": playlist_kind},
+                )
+                return data
             if e.resp.status == 403 and "quotaExceeded" in str(e):
                 logger.error(
                     "YouTube API quota exceeded",
@@ -394,12 +411,10 @@ def parse_response(response, type: TableType) -> list[dict]:
                 "comment_count": int(stat.get("commentCount", 0)),
             }
         elif type == "video_detail":
-            # Определение типа видео (short или обычное)
+            # >3 min → definitely not a Short; ≤3 min left NULL → fill from playlist_shorts
             video_id = item.get("id")
             duration = parse_yt_time(item["contentDetails"].get("duration", ""))
-            is_short = (
-                True if duration <= 60 else False if duration > 3 * 60 else None
-            )  # Если меньше минуты - точно шорт, если больше 3 минут - точно не шорт
+            is_short = False if duration > 3 * 60 else None
 
             val = {
                 "video_id": video_id,

@@ -1,6 +1,8 @@
 from datetime import date, datetime, UTC
 from pathlib import Path
-from sqlalchemy import text, select, or_, and_
+import sys
+import time
+from sqlalchemy import text, select, or_, and_, bindparam
 
 from app.dao.base import BaseDAO
 from app.database import async_session_maker
@@ -234,6 +236,96 @@ class VideoDAO(BaseDAO):
         return data
 
     @classmethod
+    async def update_is_short_new(
+        cls,
+        *,
+        category_ids: list[int] | None = None,
+        channel_ids: list[str] | None = None,
+        only_null: bool = True,
+    ) -> dict:
+        """
+        Apply is_short from playlist_shorts (UUSH mirror). No YouTube API.
+
+        Scope: optional category_ids / channel_ids; omit both → all synced channels.
+        Default window per channel: MIN(playlist_shorts.published_at) .. last_shorts_fetch_dt.
+        FALSE only inside that window (and only if channel has shorts rows + fetch marker).
+        """
+        filters: list[str] = []
+        params: dict = {}
+
+        if channel_ids:
+            filters.append("c.channel_id IN :channel_ids")
+            params["channel_ids"] = channel_ids
+        if category_ids:
+            filters.append("c.category_id IN :category_ids")
+            params["category_ids"] = category_ids
+
+        filter_sql = (" AND " + " AND ".join(filters)) if filters else ""
+        null_sql = " AND v.is_short IS NULL" if only_null else ""
+
+        set_true = text(
+            f"""
+            UPDATE video v
+            SET is_short = TRUE,
+                updated_at = CURRENT_TIMESTAMP
+            FROM playlist_shorts ps
+            JOIN channel c ON c.channel_id = ps.channel_id
+            WHERE v.video_id = ps.video_id
+              AND c.last_shorts_fetch_dt IS NOT NULL
+              AND ps.published_at < c.last_shorts_fetch_dt
+              AND (v.is_short IS DISTINCT FROM TRUE)
+              {null_sql}
+              {filter_sql}
+            """
+        )
+        set_false = text(
+            f"""
+            UPDATE video v
+            SET is_short = FALSE,
+                updated_at = CURRENT_TIMESTAMP
+            FROM channel c
+            JOIN (
+                SELECT channel_id, MIN(published_at) AS win_from
+                FROM playlist_shorts
+                GROUP BY channel_id
+            ) w ON w.channel_id = c.channel_id
+            WHERE v.channel_id = c.channel_id
+              AND c.last_shorts_fetch_dt IS NOT NULL
+              AND w.win_from IS NOT NULL
+              AND v.published_at >= w.win_from
+              AND v.published_at < c.last_shorts_fetch_dt
+              AND v.status = 1
+              AND NOT EXISTS (
+                  SELECT 1 FROM playlist_shorts ps
+                  WHERE ps.video_id = v.video_id
+              )
+              AND (v.is_short IS DISTINCT FROM FALSE)
+              {null_sql}
+              {filter_sql}
+            """
+        )
+
+        if channel_ids:
+            set_true = set_true.bindparams(bindparam("channel_ids", expanding=True))
+            set_false = set_false.bindparams(bindparam("channel_ids", expanding=True))
+        if category_ids:
+            set_true = set_true.bindparams(bindparam("category_ids", expanding=True))
+            set_false = set_false.bindparams(bindparam("category_ids", expanding=True))
+
+        async with async_session_maker() as session:
+            r_true = await session.execute(set_true, params)
+            r_false = await session.execute(set_false, params)
+            await session.commit()
+            n_true = r_true.rowcount
+            n_false = r_false.rowcount
+
+        logger.info(
+            f"update_is_short_new: cats={category_ids} channels={channel_ids} "
+            f"only_null={only_null} set_true={n_true} set_false={n_false}"
+        )
+        return {"set_true": n_true, "set_false": n_false}
+
+    @classmethod
     async def update_is_short(cls, video_list: list[str] = None, from_file: str = None):
 
         if not video_list:
@@ -397,6 +489,231 @@ class VideoStatDAO(BaseDAO):
 
             return await VideoStatBqDAO.add_bulk(data)
         return await super().add_bulk(data)
+
+    @classmethod
+    async def top_for_channel(
+        cls,
+        *,
+        channel_id: str,
+        report_period: date | Period,
+        limit: int = 10,
+    ) -> list[dict]:
+        """Top videos for channel in period (new uploads by score; longs before shorts)."""
+        if isinstance(report_period, Period):
+            report_period = date(report_period.year, report_period.month, 1)
+
+        async with async_session_maker() as session:
+            result = await session.execute(
+                text(
+                    """
+                    SELECT
+                        v.video_id,
+                        v.channel_id,
+                        v.title,
+                        v.description,
+                        v.video_url,
+                        v.thumbnail_url,
+                        v.duration,
+                        v.published_at,
+                        v.is_clickbait,
+                        v.clickbait_comment,
+                        vs.report_period,
+                        vs.is_short,
+                        vs.is_new,
+                        vs.period_view_count,
+                        vs.period_like_count,
+                        vs.period_comment_count,
+                        vs.view_count,
+                        vs.like_count,
+                        vs.comment_count,
+                        CASE
+                            WHEN vs.is_short
+                            THEN COALESCE(vs.period_view_count, 0) / 10.0
+                            ELSE COALESCE(vs.period_view_count, 0)
+                        END AS score
+                    FROM video_stat AS vs
+                    JOIN video AS v ON v.video_id = vs.video_id
+                    WHERE vs.channel_id = :channel_id
+                      AND vs.report_period = :report_period
+                      AND vs.is_new IS TRUE
+                      AND COALESCE(v.status, 1) > 0
+                    ORDER BY
+                        vs.is_short ASC NULLS FIRST,
+                        score DESC
+                    LIMIT :limit
+                    """
+                ),
+                {
+                    "channel_id": channel_id,
+                    "report_period": report_period,
+                    "limit": limit,
+                },
+            )
+            rows = []
+            for row in result.mappings().all():
+                item = dict(row)
+                if item.get("report_period") is not None:
+                    item["report_period"] = item["report_period"].isoformat()
+                if item.get("published_at") is not None:
+                    item["published_at"] = item["published_at"].isoformat()
+                if item.get("score") is not None:
+                    item["score"] = int(round(float(item["score"])))
+                rows.append(item)
+            return rows
+
+    @classmethod
+    async def backfill_denorm(
+        cls,
+        *,
+        report_period: date | Period | None = None,
+        batch_size: int = 10_000,
+    ) -> int:
+        """
+        Fill NULL denorm cols on video_stat: build staging → UPDATE in batches.
+
+        MoM / is_new / is_short match video_stat_change (sql/views.sql), joins
+        inlined + scoped (no view). Staging is UNLOGGED (not TEMP) so rebuild
+        survives connection drops; UPDATE commits every batch_size rows.
+
+        report_period: optional YYYY-MM-01 (or Period); None = all periods.
+        Only rows with video.channel_id NOT NULL and channel.status > 0.
+        """
+        period_sql = ""
+        params: dict = {}
+        if report_period is not None:
+            if isinstance(report_period, Period):
+                report_period = date(report_period.year, report_period.month, 1)
+            period_sql = "AND cur.report_period = :report_period"
+            params["report_period"] = report_period
+
+        # Same filters/CASE as video_stat_change; no ORDER BY
+        create_stg = f"""
+            CREATE UNLOGGED TABLE _vs_denorm_stg AS
+            SELECT
+                cur.id,
+                v.channel_id,
+                (cur.report_period = v.published_at_period) AS is_new,
+                (CASE WHEN v.is_short THEN TRUE ELSE FALSE END) AS is_short,
+                CASE
+                    WHEN prev.video_id IS NOT NULL
+                        THEN cur.view_count - prev.view_count
+                    WHEN cur.report_period = v.published_at_period
+                        THEN cur.view_count
+                    ELSE 0
+                END AS period_view_count,
+                CASE
+                    WHEN prev.video_id IS NOT NULL
+                        THEN cur.like_count - prev.like_count
+                    WHEN cur.report_period = v.published_at_period
+                        THEN cur.like_count
+                    ELSE 0
+                END AS period_like_count,
+                CASE
+                    WHEN prev.video_id IS NOT NULL
+                        THEN cur.comment_count - prev.comment_count
+                    WHEN cur.report_period = v.published_at_period
+                        THEN cur.comment_count
+                    ELSE 0
+                END AS period_comment_count
+            FROM video_stat AS cur
+            JOIN video AS v ON v.video_id = cur.video_id
+            LEFT JOIN video_stat AS prev
+                ON prev.report_period = cur.prev_period
+               AND prev.video_id = cur.video_id
+            JOIN channel AS c ON c.channel_id = v.channel_id
+            WHERE v.channel_id IS NOT NULL
+              AND c.status > 0
+              AND (
+                  cur.channel_id IS NULL
+                  OR cur.is_short IS NULL
+                  OR cur.is_new IS NULL
+                  OR cur.period_view_count IS NULL
+                  OR cur.period_like_count IS NULL
+                  OR cur.period_comment_count IS NULL
+              )
+              {period_sql}
+        """
+        apply_batch = """
+            WITH batch AS (
+                SELECT id FROM _vs_denorm_stg
+                ORDER BY id
+                LIMIT :batch_size
+            ),
+            upd AS (
+                UPDATE video_stat AS vs
+                SET
+                    channel_id = s.channel_id,
+                    is_short = s.is_short,
+                    is_new = s.is_new,
+                    period_view_count = s.period_view_count,
+                    period_like_count = s.period_like_count,
+                    period_comment_count = s.period_comment_count,
+                    updated_at = CURRENT_TIMESTAMP
+                FROM _vs_denorm_stg AS s
+                JOIN batch b ON b.id = s.id
+                WHERE vs.id = s.id
+                RETURNING s.id
+            )
+            DELETE FROM _vs_denorm_stg s
+            USING upd
+            WHERE s.id = upd.id
+        """
+        total = 0
+        t_all = time.monotonic()
+        async with async_session_maker() as session:
+            await session.execute(text("DROP TABLE IF EXISTS _vs_denorm_stg"))
+            await session.execute(text(create_stg), params)
+            await session.execute(text("CREATE INDEX ON _vs_denorm_stg (id)"))
+            cnt = await session.execute(text("SELECT count(*) FROM _vs_denorm_stg"))
+            stg_n = cnt.scalar_one()
+            await session.commit()
+            stg_s = time.monotonic() - t_all
+            logger.info(
+                f"video_stat.backfill_denorm: staging rows={stg_n} "
+                f"in {stg_s:.1f}s"
+            )
+
+            t0 = time.monotonic()
+            period_label = (
+                report_period.isoformat() if report_period else "all"
+            )
+            while True:
+                result = await session.execute(
+                    text(apply_batch), {"batch_size": batch_size}
+                )
+                # DELETE rowcount == updated ids
+                n = result.rowcount
+                await session.commit()
+                if not n:
+                    break
+                total += n
+                elapsed = time.monotonic() - t0
+                rate = total / elapsed if elapsed > 0 else 0
+                left = max(stg_n - total, 0)
+                eta_s = left / rate if rate > 0 else 0
+                pct = (100.0 * total / stg_n) if stg_n else 100.0
+                msg = (
+                    f"\rbackfill {period_label}: {total}/{stg_n} "
+                    f"({pct:5.1f}%) ETA {eta_s:6.0f}s   "
+                )
+                sys.stdout.write(msg)
+                sys.stdout.flush()
+
+            apply_s = time.monotonic() - t0
+            if stg_n:
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+
+            await session.execute(text("DROP TABLE IF EXISTS _vs_denorm_stg"))
+            await session.commit()
+
+        total_s = time.monotonic() - t_all
+        logger.info(
+            f"video_stat.backfill_denorm: updated {total} rows "
+            f"period={report_period} in {total_s:.1f}s "
+            f"(staging {stg_s:.1f}s, apply {apply_s:.1f}s)"
+        )
+        return total
 
     @classmethod
     async def update_stat(

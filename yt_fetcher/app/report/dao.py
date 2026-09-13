@@ -1,5 +1,6 @@
 from datetime import date
 import os
+from pathlib import Path
 
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
@@ -123,6 +124,54 @@ class ReportDAO(BaseDAO):
         return await ReportBqDAO.sync_from_bq(period, category_ids)
 
     @classmethod
+    async def build_in_pg(
+        cls,
+        period: Period,
+        category_ids: int | list[int],
+        *,
+        top_n: int = 5,
+        rank_limit: int = 100,
+    ) -> bool:
+        """Upsert report JSON in Postgres via sql/build_report_pg.sql (one category at a time)."""
+        if isinstance(category_ids, int):
+            category_ids = [category_ids]
+        if not category_ids:
+            logger.warning("build_in_pg: empty category_ids")
+            return False
+
+        sql_path = Path(__file__).resolve().parents[2] / "sql" / "build_report_pg.sql"
+        sql = sql_path.read_text(encoding="utf-8")
+
+        ok = True
+        async with async_session_maker() as session:
+            for i, category_id in enumerate(category_ids, start=1):
+                logger.info(
+                    f"PG build report {i}/{len(category_ids)}: "
+                    f"period={period} category={category_id} "
+                    f"top_n={top_n} rank_limit={rank_limit}"
+                )
+                try:
+                    await session.execute(
+                        text(sql),
+                        {
+                            "report_period": period,
+                            "category_id": category_id,
+                            "top_n": top_n,
+                            "rank_limit": rank_limit,
+                        },
+                    )
+                    await session.commit()
+                except Exception:
+                    await session.rollback()
+                    logger.error(
+                        f"build_in_pg failed period={period} category={category_id}",
+                        exc_info=True,
+                    )
+                    ok = False
+                    break
+        return ok
+
+    @classmethod
     async def build(cls, period: Period, category_ids: int):
         if isinstance(category_ids, int):
             category_ids = [category_ids]
@@ -136,29 +185,8 @@ class ReportDAO(BaseDAO):
             n = await cls.sync_from_bq(period, category_ids)
             return True if n else None
 
-        for i, category_id in enumerate(category_ids, start=1):
-            logger.info(f"{i}/{len(category_ids)}: category {category_id}")
-            logger.debug("Getting data from view")
-            data = await cls.query_report_view(period, category_id)
-            if not data:
-                return None
-
-            logger.debug("Adding data to database")
-            res = await cls.add_or_update(
-                data={
-                    "report_period": period,
-                    "category_id": category_id,
-                    "data": data,
-                },
-                do_nothing=False,
-            )
-            msg = f"report for {period}, category {category_id}: {res}"
-            if not res:
-                logger.error(f"Cannot add {msg}")
-                return None
-
-            logger.info(f"Added {msg}")
-        return True
+        # PG: nested JSON upsert in SQL (one category per statement)
+        return True if await cls.build_in_pg(period, category_ids) else None
 
     @classmethod
     async def refresh_channel_report(cls) -> dict:

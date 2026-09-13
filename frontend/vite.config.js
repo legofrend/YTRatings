@@ -17,11 +17,10 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 5173,
     proxy: {
-      // dev: same-origin /api → боевой бэк (без CORS в браузере)
+      // browser /api/ytr/... → local FastAPI (also listens under /api via root_path)
       '/api': {
-        target: 'https://ytr.o2t4.ru',
+        target: 'http://127.0.0.1:5000',
         changeOrigin: true,
-        secure: true,
       },
     },
   },
