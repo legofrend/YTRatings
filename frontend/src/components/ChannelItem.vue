@@ -14,10 +14,25 @@ const props = defineProps({
 
 const showDetails = ref(false);
 const copied = ref(false);
+const logoSrc = ref(localLogo(props.item));
 
-function channelThumbnail(ch) {
-  return 'channel_logo/' + ch.custom_url + '.jpg';
+function localLogo(ch) {
+  return ch?.custom_url ? `channel_logo/${ch.custom_url}.jpg` : '';
 }
+
+function onLogoError() {
+  const yt = props.item?.thumbnail_url;
+  if (yt && logoSrc.value !== yt) {
+    logoSrc.value = yt;
+  }
+}
+
+watch(
+  () => props.item.channel_id,
+  () => {
+    logoSrc.value = localLogo(props.item);
+  }
+);
 
 function mapVideo(v) {
   return {
@@ -140,9 +155,10 @@ watch(
       <div class="relative">
         <img
           class="h-10 w-10 md:h-16 md:w-16 rounded-sm border border-gray-300 cursor-pointer hover:opacity-80"
-          :src="channelThumbnail(item)"
+          :src="logoSrc"
           :alt="item.channel_title"
           :title="'Клик — скопировать ID\n' + item.channel_title + '\n' + item.custom_url + '\n' + item.channel_id"
+          @error="onLogoError"
           @click="copyChannelId"
         />
         <div
