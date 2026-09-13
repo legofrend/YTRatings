@@ -1,4 +1,5 @@
-bar_race
+analysis/*
+!analysis/channel_analytics.ipynb
 data
 video_gen
 backend
