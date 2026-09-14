@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, date, datetime, timedelta
 import time
 
@@ -198,8 +199,98 @@ class ChannelDAO(BaseDAO):
 
         data = yt.channel_list(channel_ids, obj_type="detail")
         if data:
-            await cls.add_update_bulk(data, do_nothing=do_nothing)
+            # Only touch detail fields — add_update_bulk would NULL out
+            # category_id/status/priority/fetch dts via excluded defaults.
+            if do_nothing:
+                await cls.add_update_bulk(data, do_nothing=True)
+            else:
+                await cls.update_bulk(data, identifier="channel_id")
         return data
+
+    @classmethod
+    async def refresh_broken_thumbnails(
+        cls,
+        *,
+        category_id: int | None = None,
+        concurrency: int = 20,
+        timeout_s: float = 10.0,
+    ) -> dict:
+        """
+        Check channel.thumbnail_url reachability; refresh detail via YT API for broken ones.
+
+        category_id: only that category (status=1); None = all active channels.
+        """
+        import aiohttp
+
+        async with async_session_maker() as session:
+            q = select(
+                Channel.channel_id,
+                Channel.channel_title,
+                Channel.custom_url,
+                Channel.thumbnail_url,
+            ).where(Channel.status == 1)
+            if category_id is not None:
+                q = q.where(Channel.category_id == category_id)
+            rows = (await session.execute(q)).mappings().all()
+
+        channels = [dict(r) for r in rows]
+        logger.info(
+            f"refresh_broken_thumbnails: checking {len(channels)} channels "
+            f"category_id={category_id}"
+        )
+
+        sem = asyncio.Semaphore(concurrency)
+        timeout = aiohttp.ClientTimeout(total=timeout_s)
+        broken: list[dict] = []
+
+        async def _check(ch: dict, session: aiohttp.ClientSession) -> None:
+            url = (ch.get("thumbnail_url") or "").strip()
+            if not url:
+                broken.append({**ch, "reason": "empty_url"})
+                return
+            async with sem:
+                try:
+                    async with session.head(url, allow_redirects=True) as resp:
+                        if resp.status == 405:
+                            async with session.get(url, allow_redirects=True) as g:
+                                ok = 200 <= g.status < 400
+                                status = g.status
+                        else:
+                            ok = 200 <= resp.status < 400
+                            status = resp.status
+                    if not ok:
+                        broken.append({**ch, "reason": f"http_{status}"})
+                except Exception as e:
+                    broken.append({**ch, "reason": type(e).__name__})
+
+        async with aiohttp.ClientSession(timeout=timeout) as http:
+            await asyncio.gather(*[_check(ch, http) for ch in channels])
+
+        broken_ids = [c["channel_id"] for c in broken]
+        logger.info(
+            f"refresh_broken_thumbnails: broken={len(broken_ids)}/{len(channels)}"
+        )
+        for c in broken[:20]:
+            logger.info(
+                f"  broken {c.get('custom_url') or c['channel_id']}: {c.get('reason')}"
+            )
+        if len(broken) > 20:
+            logger.info(f"  ... and {len(broken) - 20} more")
+
+        updated = []
+        if broken_ids:
+            updated = await cls.update_detail(channel_ids=broken_ids) or []
+            logger.info(
+                f"refresh_broken_thumbnails: refreshed detail for {len(updated)} channels"
+            )
+
+        return {
+            "checked": len(channels),
+            "broken": len(broken_ids),
+            "broken_ids": broken_ids,
+            "broken_detail": broken,
+            "updated": len(updated) if updated else 0,
+        }
 
     @classmethod
     async def search_by_keywords(

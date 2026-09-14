@@ -11,6 +11,7 @@ Commands:
   apply-is-short — set video.is_short from playlist_shorts (--cats / --channel-id optional)
   backfill-denorm — fill NULL video_stat denorm cols (channel_id/is_short/is_new/period_*)
   backfill-channel-denorm — fill channel_stat denorm (pc_*/pv_*/ppcs_id/ranks) from video_stat
+  refresh-thumbnails — HEAD/GET channel.thumbnail_url; YT detail refresh for broken (--cats optional)
 
 Examples:
   python -m app.main channel-stat --cats 1
@@ -28,6 +29,8 @@ Examples:
   python -m app.main backfill-denorm --period 2026-08
   python -m app.main backfill-denorm --period 2025-05 --period-to 2026-07
   python -m app.main backfill-channel-denorm --period 2025-05 --period-to 2026-08
+  python -m app.main refresh-thumbnails
+  python -m app.main refresh-thumbnails --cats 7
 """
 
 from __future__ import annotations
@@ -280,6 +283,23 @@ async def cmd_backfill_channel_denorm(
         logger.info(f"backfill-channel-denorm {p.strf('%p')}: {stats}")
 
 
+async def cmd_refresh_thumbnails(category_ids: list[int] | None) -> None:
+    """Check logo URLs; refresh YT detail for broken ones. None cats → all status=1."""
+    if not category_ids:
+        r = await ChannelDAO.refresh_broken_thumbnails(category_id=None)
+        logger.info(
+            f"refresh-thumbnails all: checked={r['checked']} "
+            f"broken={r['broken']} updated={r['updated']}"
+        )
+        return
+    for cid in category_ids:
+        r = await ChannelDAO.refresh_broken_thumbnails(category_id=cid)
+        logger.info(
+            f"refresh-thumbnails cat={cid}: checked={r['checked']} "
+            f"broken={r['broken']} updated={r['updated']}"
+        )
+
+
 COMMANDS = {
     "channel-stat": cmd_channel_stat,
     "videos": cmd_videos,
@@ -290,6 +310,7 @@ COMMANDS = {
     "apply-is-short": cmd_apply_is_short,
     "backfill-denorm": cmd_backfill_denorm,
     "backfill-channel-denorm": cmd_backfill_channel_denorm,
+    "refresh-thumbnails": cmd_refresh_thumbnails,
 }
 
 
@@ -302,7 +323,7 @@ def build_parser() -> argparse.ArgumentParser:
         "commands",
         nargs="*",
         choices=list(COMMANDS),
-        help="one or more: channel-stat | videos | video-stat | publish | channel-report | shorts-sync | apply-is-short | backfill-denorm | backfill-channel-denorm",
+        help="one or more: channel-stat | videos | video-stat | publish | channel-report | shorts-sync | apply-is-short | backfill-denorm | backfill-channel-denorm | refresh-thumbnails",
     )
     p.add_argument(
         "--period",
@@ -429,6 +450,8 @@ async def _run_parsed(args: argparse.Namespace) -> None:
                 Period.parse(args.period),
                 Period.parse(args.period_to) if args.period_to else None,
             )
+        elif name == "refresh-thumbnails":
+            await cmd_refresh_thumbnails(parse_cats(args.cats))
         else:
             raise SystemExit(f"unknown command: {name}")
 
