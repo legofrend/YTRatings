@@ -21,7 +21,8 @@ const showDetails = ref(false);
 const copied = ref(false);
 const videosExpanded = ref(false);
 const EMPTY_LOGO = '/img/empty.png';
-const logoSrc = ref(localLogo(props.item) || EMPTY_LOGO);
+const logoImg = ref(null);
+const logoSrc = ref(localLogo(props.item) || props.item?.thumbnail_url || EMPTY_LOGO);
 const visibleVideos = computed(() => {
   const list = props.item.top_videos || [];
   return videosExpanded.value ? list : list.slice(0, 5);
@@ -33,8 +34,9 @@ const canExpandVideos = computed(
 );
 
 function localLogo(ch) {
-  // absolute — иначе на /ratings/1/2026-08-01/ уезжает в /ratings/1/channel_logo/...
-  return ch?.custom_url ? `/channel_logo/${ch.custom_url}.jpg` : '';
+  // absolute — иначе на вложенных URL уезжает в относительный путь
+  if (!ch?.custom_url) return '';
+  return `/channel_logo/${encodeURIComponent(ch.custom_url)}.jpg`;
 }
 
 function onLogoError() {
@@ -48,10 +50,16 @@ function onLogoError() {
   }
 }
 
+/** SSG: img may 404 before Vue hydrates and @error is missed. */
+onMounted(() => {
+  const el = logoImg.value;
+  if (el && el.complete && el.naturalWidth === 0) onLogoError();
+});
+
 watch(
   () => props.item.channel_id,
   () => {
-    logoSrc.value = localLogo(props.item) || EMPTY_LOGO;
+    logoSrc.value = localLogo(props.item) || props.item?.thumbnail_url || EMPTY_LOGO;
   }
 );
 
@@ -179,6 +187,7 @@ watch(
 
       <div class="relative">
         <img
+          ref="logoImg"
           class="h-10 w-10 md:h-16 md:w-16 rounded-sm border border-gray-300 cursor-pointer hover:opacity-80"
           :src="logoSrc"
           :alt="item.channel_title"
