@@ -18,6 +18,7 @@ class CategoryDAO(BaseDAO):
                     Category.name,
                     Category.title,
                     Category.description,
+                    Category.sys_name,
                     Category.sort_order,
                 )
                 .where(Category.active == 1)

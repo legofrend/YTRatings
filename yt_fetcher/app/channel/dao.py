@@ -658,6 +658,10 @@ class ChannelStatDAO(BaseDAO):
                     ChannelStat.pv_score,
                     ChannelStat.pv_score_change,
                     ChannelStat.pv_view,
+                    ChannelStat.pv_view_new_long,
+                    ChannelStat.pv_view_old_long,
+                    ChannelStat.pv_view_new_short,
+                    ChannelStat.pv_view_old_short,
                     ChannelStat.channel_view_count,
                     ChannelStat.pc_view,
                     ChannelStat.subscriber_count,
@@ -679,6 +683,86 @@ class ChannelStatDAO(BaseDAO):
             points.reverse()  # chronological
             return {
                 "channel": dict(channel),
+                "points": points,
+            }
+
+    @classmethod
+    async def category_dynamics(
+        cls,
+        *,
+        category_id: int,
+        limit: int = 20,
+        months: int = 12,
+    ) -> dict | None:
+        """
+        Per month: sum score / view buckets of top-`limit` channels
+        (by pv_score_rank) in the category. Last `months` periods.
+        """
+        limit = max(1, min(int(limit), 100))
+        months = max(1, min(int(months), 60))
+
+        periods = await cls.periods_for_category(category_id)
+        if not periods:
+            return None
+        window = periods[:months]
+        oldest = window[-1]
+
+        async with async_session_maker() as session:
+            result = await session.execute(
+                select(
+                    ChannelStat.report_period,
+                    ChannelStat.pv_score,
+                    ChannelStat.pv_view_new_long,
+                    ChannelStat.pv_view_old_long,
+                    ChannelStat.pv_view_new_short,
+                    ChannelStat.pv_view_old_short,
+                    ChannelStat.pv_view,
+                )
+                .join(Channel, Channel.channel_id == ChannelStat.channel_id)
+                .where(
+                    Channel.category_id == category_id,
+                    Channel.status == 1,
+                    ChannelStat.report_period >= oldest,
+                    ChannelStat.report_period.is_not(None),
+                    ChannelStat.pv_score_rank.is_not(None),
+                    ChannelStat.pv_score_rank <= limit,
+                )
+            )
+            buckets: dict[date, dict] = {}
+            for row in result.mappings().all():
+                rp = row["report_period"]
+                b = buckets.setdefault(
+                    rp,
+                    {
+                        "report_period": rp,
+                        "pv_score": 0.0,
+                        "pv_view_new_long": 0.0,
+                        "pv_view_old_long": 0.0,
+                        "pv_view_new_short": 0.0,
+                        "pv_view_old_short": 0.0,
+                        "pv_view": 0.0,
+                    },
+                )
+                b["pv_score"] += float(row["pv_score"] or 0)
+                b["pv_view_new_long"] += float(row["pv_view_new_long"] or 0)
+                b["pv_view_old_long"] += float(row["pv_view_old_long"] or 0)
+                b["pv_view_new_short"] += float(row["pv_view_new_short"] or 0)
+                b["pv_view_old_short"] += float(row["pv_view_old_short"] or 0)
+                b["pv_view"] += float(row["pv_view"] or 0)
+
+            points = []
+            for rp in sorted(window):
+                b = buckets.get(rp)
+                if not b:
+                    continue
+                p = dict(b)
+                p["report_period"] = rp.isoformat()
+                points.append(p)
+
+            return {
+                "category_id": category_id,
+                "limit": limit,
+                "months": months,
                 "points": points,
             }
 

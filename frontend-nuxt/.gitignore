@@ -1,0 +1,15 @@
+node_modules
+.nuxt
+.output
+.data
+dist
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+# regenerated on every `npm run generate` from categories API
+public/sitemap.xml
+public/robots.txt
+# local junction to logo cache — not part of the Nuxt package
+public/channel_logo

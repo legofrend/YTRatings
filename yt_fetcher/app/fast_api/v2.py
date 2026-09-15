@@ -12,7 +12,7 @@ router = APIRouter(prefix="/ytr/v2", tags=["ytr-v2"])
 
 @router.get("/categories")
 async def list_categories():
-    """Active categories: id, name, sort_order."""
+    """Active categories: id, name, title, description, sys_name, sort_order."""
     return await CategoryDAO.list_active()
 
 
@@ -99,6 +99,34 @@ async def channel_dynamics(
     return {
         "channel": data["channel"],
         "months": months,
+        "period_from": points[0]["report_period"],
+        "period_to": points[-1]["report_period"],
+        "points": points,
+    }
+
+
+@router.get("/category")
+async def category_dynamics(
+    category_id: int = Query(..., description="Category id"),
+    limit: int = Query(
+        20, ge=1, le=100, description="Top N channels per month to sum"
+    ),
+    months: int = Query(12, ge=1, le=60, description="How many latest months"),
+):
+    """Sum of score / view buckets for top-N channels in category, per month."""
+    data = await ChannelStatDAO.category_dynamics(
+        category_id=category_id,
+        limit=limit,
+        months=months,
+    )
+    if not data or not data["points"]:
+        raise HTTPException(status_code=404, detail="No history for category")
+
+    points = data["points"]
+    return {
+        "category_id": data["category_id"],
+        "limit": data["limit"],
+        "months": data["months"],
         "period_from": points[0]["report_period"],
         "period_to": points[-1]["report_period"],
         "points": points,

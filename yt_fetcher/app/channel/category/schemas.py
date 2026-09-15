@@ -11,6 +11,7 @@ class SCategory(BaseModel):
     name: str
     title: str
     description: Optional[str] = ""
+    sys_name: Optional[str] = None
 
 
 # print("ok")

@@ -57,8 +57,9 @@ Main objects and properties:
 |-----|------|
 | git-репо | `/var/www/o2t4/backend/YTRatings/` |
 | backend + compose | `/var/www/o2t4/backend/YTRatings/yt_fetcher/` |
-| frontend source | `/var/www/o2t4/backend/YTRatings/frontend/` |
-| frontend dist (live) | `/var/www/o2t4/backend/YTRatings/frontend/dist/` |
+| frontend source (legacy SPA) | `/var/www/o2t4/backend/YTRatings/frontend/` |
+| frontend-nuxt (SSG) | `/var/www/o2t4/backend/YTRatings/frontend-nuxt/` |
+| frontend live (nginx root) | `/var/www/o2t4/ytr/` |
 | nginx конфиг | `/etc/nginx/sites-available/ytr` → `sites-enabled/ytr` |
 | backup nginx в репо | `nginx/ytr.nginx.conf` |
 | docker | `ytr_app` (:5001), `o2t4_db` (:5433) из `yt_fetcher/docker-compose.yml` |
@@ -67,7 +68,7 @@ Main objects and properties:
 
 | Host | Что отдаёт |
 |------|------------|
-| `ytr.o2t4.ru` | `root` → `.../frontend/dist/` |
+| `ytr.o2t4.ru` | `root` → `/var/www/o2t4/ytr/` (Nuxt SSG `.output/public`) |
 | `ytr.o2t4.ru/api/ytr/` | proxy → `http://127.0.0.1:5001/api/ytr/` |
 | `o2t4.ru` | `/var/www/o2t4/` (лендинг, не Vue app) |
 
@@ -91,10 +92,14 @@ ssh root@o2t4.ru
 
 ```bash
 cd /var/www/o2t4/backend/YTRatings
-git pull
+git fetch && git checkout <branch> && git pull
+
+# API
 cd yt_fetcher && docker compose up -d --build
-# frontend: локально npm run build, затем залить dist/ на VPS
-#   .../frontend/dist/
+
+# Frontend SSG: собрать локально (нужен API с sys_name), залить .output/public → /var/www/o2t4/ytr/
+# Не затирать channel_logo/; empty.png и остальной static — да.
+# nginx: try_files $uri $uri/ $uri/index.html =404;
 ```
 
 ## Локально: poetry groups (`yt_fetcher`)
