@@ -118,8 +118,10 @@ if (-not $SkipFrontend) {
   }
   Step "Sync frontend/dist to VPS (exclude channel_logo/)"
   $remoteDist = "$RemoteRoot/frontend/dist"
-  $sshCmd = "mkdir -p '$remoteDist'; tar -xf - -C '$remoteDist'"
-  & tar -C $distLocal --exclude=channel_logo -cf - . | ssh $RemoteHost $sshCmd
+  # PowerShell '|' corrupts binary streams - use cmd.exe for tar|ssh
+  $distUnix = ($distLocal -replace '\\', '/')
+  $cmd = "tar -C `"$distLocal`" --exclude=channel_logo -cf - . | ssh $RemoteHost `"mkdir -p '$remoteDist' && tar -xf - -C '$remoteDist'`""
+  cmd.exe /c $cmd
   Assert-Ok "frontend sync"
 
   Step "nginx reload"
