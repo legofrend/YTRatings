@@ -128,6 +128,7 @@ export default defineNuxtConfig({
       meta: [
         { charset: 'utf-8' },
         { name: 'viewport', content: 'width=device-width, initial-scale=1' },
+        { name: 'yandex-verification', content: '1ccb02fae8457b4f' },
         {
           name: 'description',
           content:
