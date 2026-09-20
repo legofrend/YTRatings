@@ -83,6 +83,7 @@ if (-not $SkipGenerate) {
     $env:NUXT_API_BASE = $ApiBase
     $env:NUXT_PUBLIC_API_BASE = "/api/ytr/v2"
     $env:NUXT_PUBLIC_SITE_URL = "https://ytr.o2t4.ru"
+    $env:NUXT_IGNORE_LOCK = "1"
     npm run generate
     Assert-Ok "npm run generate"
   } finally {

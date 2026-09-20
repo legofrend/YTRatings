@@ -69,6 +69,7 @@ if [[ "$SKIP_GENERATE" -eq 0 ]]; then
     export NUXT_API_BASE="$API_BASE"
     export NUXT_PUBLIC_API_BASE="/api/ytr/v2"
     export NUXT_PUBLIC_SITE_URL="https://ytr.o2t4.ru"
+    export NUXT_IGNORE_LOCK=1
     npm run generate
   )
   [[ -d "$SSG_OUT" ]] || { echo "SSG output missing: $SSG_OUT"; exit 1; }
