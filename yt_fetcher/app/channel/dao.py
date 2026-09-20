@@ -165,14 +165,144 @@ class ChannelDAO(BaseDAO):
 
     @classmethod
     async def add_channels(cls, names: list[str], category_id: int = None):
+        """Legacy: resolve by search.list (expensive). Prefer add_by_handles."""
         channel_ids = []
         for name in names:
-            res = await cls.search_channel(name, category_id=category_id)
-            if res:
-                channel_ids.append(res[0].get("channel_id"))
-        if channel_ids:
-            await cls.update_detail(channel_ids=channel_ids)
+            await cls.search_channel(name, category_id=category_id)
+            # search_channel returns True; re-read by title is unreliable — skip ids
+        # Best-effort detail refresh for category
+        if category_id is not None:
+            await cls.update_detail(category_id=category_id)
         return channel_ids
+
+    @classmethod
+    async def add_by_handles(
+        cls,
+        handles: list[str],
+        *,
+        category_id: int,
+        priority: int = 100,
+        status: int = 1,
+    ) -> dict:
+        """
+        Resolve YouTube handles via channels.list(forHandle=…) and upsert into channel.
+
+        On INSERT: sets category_id / status / priority.
+        On CONFLICT: refreshes YT detail fields only — never overwrites category_id,
+        status, or priority (a channel belongs to one category; world/import must not
+        steal existing Russian-category placements).
+        Fetch timestamps are omitted from the payload and stay untouched.
+        """
+        import app.api.ytapi as yt
+
+        if not handles:
+            return {
+                "requested": 0,
+                "fetched": 0,
+                "upserted": 0,
+                "inserted": 0,
+                "updated": 0,
+                "skipped_existing": 0,
+                "channel_ids": [],
+            }
+
+        details = yt.channel_list(handles=handles, obj_type="detail")
+        if not details:
+            logger.warning("add_by_handles: no channels returned from API")
+            return {
+                "requested": len(handles),
+                "fetched": 0,
+                "upserted": 0,
+                "inserted": 0,
+                "updated": 0,
+                "skipped_existing": 0,
+                "channel_ids": [],
+            }
+
+        rows = []
+        for d in details:
+            cid = d.get("channel_id")
+            if not cid:
+                continue
+            rows.append(
+                {
+                    "channel_id": cid,
+                    "channel_title": d.get("channel_title") or "",
+                    "description": d.get("description"),
+                    "custom_url": d.get("custom_url"),
+                    "thumbnail_url": d.get("thumbnail_url"),
+                    "published_at": d.get("published_at"),
+                    "category_id": category_id,
+                    "status": status,
+                    "priority": priority,
+                }
+            )
+
+        if not rows:
+            return {
+                "requested": len(handles),
+                "fetched": len(details),
+                "upserted": 0,
+                "inserted": 0,
+                "updated": 0,
+                "skipped_existing": 0,
+                "channel_ids": [],
+            }
+
+        from app.api import yt_pending
+
+        ok = await yt_pending.commit_rows(
+            "channel_detail_handles",
+            rows,
+            scope=f"cat{category_id}",
+        )
+        channel_ids = [r["channel_id"] for r in rows] if ok else []
+        logger.info(
+            f"add_by_handles: requested={len(handles)} fetched={len(details)} "
+            f"upserted={len(channel_ids)} ok={ok} "
+            f"category_id={category_id}(new only) priority={priority}(new only)"
+        )
+        return {
+            "requested": len(handles),
+            "fetched": len(details),
+            "upserted": len(channel_ids),
+            "inserted": 0,
+            "updated": 0,
+            "skipped_existing": 0,
+            "channel_ids": channel_ids,
+        }
+
+    @classmethod
+    async def upsert_yt_handle_rows(cls, rows: list[dict]) -> bool:
+        """
+        Insert new channels with category/status/priority; on conflict refresh
+        YT detail fields only (never steal category ownership).
+        """
+        if not rows:
+            return True
+        if _raw_is_bq():
+            return await cls.add_update_bulk(rows, do_nothing=False)
+
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        detail_cols = [
+            "channel_title",
+            "description",
+            "custom_url",
+            "thumbnail_url",
+            "published_at",
+        ]
+        stmt = pg_insert(Channel).values(rows)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["channel_id"],
+            set_={c: getattr(stmt.excluded, c) for c in detail_cols},
+        ).returning(Channel.channel_id)
+        async with async_session_maker() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+            channel_ids = [r[0] for r in result.all()]
+        logger.info(f"upsert_yt_handle_rows: upserted={len(channel_ids)}")
+        return True
 
     @classmethod
     async def update_detail(
@@ -182,6 +312,7 @@ class ChannelDAO(BaseDAO):
         do_nothing: bool = False,
     ):
         import app.api.ytapi as yt
+        from app.api import yt_pending
 
         if not channel_ids:
             if category_id:
@@ -201,10 +332,11 @@ class ChannelDAO(BaseDAO):
         if data:
             # Only touch detail fields — add_update_bulk would NULL out
             # category_id/status/priority/fetch dts via excluded defaults.
-            if do_nothing:
-                await cls.add_update_bulk(data, do_nothing=True)
-            else:
-                await cls.update_bulk(data, identifier="channel_id")
+            op = "channel_detail_upsert" if do_nothing else "channel_detail_update"
+            scope = f"cat{category_id}" if category_id else "default"
+            await yt_pending.commit_rows(
+                op, data, scope=scope, meta={"do_nothing": do_nothing}
+            )
         return data
 
     @classmethod
@@ -438,33 +570,69 @@ class ChannelDAO(BaseDAO):
             )
             for index, channel in enumerate(channels, start=1):
                 channel_id = channel["channel_id"]
-                date_from = channel["last_video_fetch_dt"] or date_from
-                if isinstance(date_from, datetime):
-                    date_from = _naive_utc(date_from)
-                # Already caught up through period end
-                if isinstance(date_from, datetime):
-                    if date_from >= period_end:
+                last_fetched = channel["last_video_fetch_dt"]
+                is_cold = last_fetched is None
+
+                if not is_cold:
+                    date_from = last_fetched
+                    if isinstance(date_from, datetime):
+                        date_from = _naive_utc(date_from)
+                    if isinstance(date_from, datetime) and date_from >= period_end:
                         logger.info(
                             f"{index}/{len(channels)}: {channel_id} - skipped (up to date)"
                         )
                         continue
-                elif isinstance(date_from, date) and date_from >= date_to:
-                    logger.info(
-                        f"{index}/{len(channels)}: {channel_id} - skipped (up to date)"
-                    )
-                    continue
+                    if isinstance(date_from, date) and not isinstance(
+                        date_from, datetime
+                    ) and date_from >= date_to:
+                        logger.info(
+                            f"{index}/{len(channels)}: {channel_id} - skipped (up to date)"
+                        )
+                        continue
+                else:
+                    date_from = None
 
-                logger.info(
-                    f"{index}/{len(channels)}: {channel_id}, last fetched {date_from}"
-                )
                 # Don't claim Sept videos if we only ingested through Aug 31
                 fetch_marker = min(datetime.now(), period_end)
-                res = await VideoDAO.get_from_playlist(
-                    channel_id,
-                    date_from=date_from,
-                    date_to=date_to,
-                    max_result=1000,
-                )
+
+                if is_cold:
+                    # First ingest: last 3 calendar months ending at date_to;
+                    # if channel is dormant in that window → latest 100 uploads.
+                    to_d = date_to if isinstance(date_to, date) else date_to.date()
+                    cold_from = datetime.combine(
+                        Period(to_d.month, to_d.year).next(-3), datetime.min.time()
+                    )
+                    logger.info(
+                        f"{index}/{len(channels)}: {channel_id} cold-start "
+                        f"window=[{cold_from.date()} .. {to_d})"
+                    )
+                    res = await VideoDAO.get_from_playlist(
+                        channel_id,
+                        date_from=cold_from,
+                        date_to=date_to,
+                        max_result=1000,
+                    )
+                    if not res:
+                        logger.info(
+                            f"{index}/{len(channels)}: {channel_id} "
+                            f"no videos in 3mo window → last 100"
+                        )
+                        res = await VideoDAO.get_from_playlist(
+                            channel_id,
+                            date_from=None,
+                            date_to=date_to,
+                            max_result=100,
+                        )
+                else:
+                    logger.info(
+                        f"{index}/{len(channels)}: {channel_id}, last fetched {date_from}"
+                    )
+                    res = await VideoDAO.get_from_playlist(
+                        channel_id,
+                        date_from=date_from,
+                        date_to=date_to,
+                        max_result=1000,
+                    )
                 # ToDo различать ситуации, когда видео нет из-за ошибки или их просто нет
                 # Сейчас информация last_fetched_video_dt обновится, даже если была ошибка при записи видео в БД
                 await cls.update(
@@ -532,6 +700,127 @@ class ChannelDAO(BaseDAO):
                 query, {"category_id": category_id, "priority": priority}
             )
             return result.mappings().all()
+
+    @classmethod
+    async def sync_priority(
+        cls,
+        *,
+        months: int = 12,
+        category_ids: list[int] | int | None = None,
+        default_priority: int = 1000,
+    ) -> dict:
+        """
+        Set channel.priority = best (MIN) pv_score_rank over the last `months`
+        report periods. Channels with no ranks in the window keep/get default_priority.
+
+        Matches operational meaning: ever in top-10 recently → priority 10 (fetch ceiling).
+        """
+        if isinstance(category_ids, int):
+            category_ids = [category_ids]
+        if months < 1:
+            raise ValueError("months must be >= 1")
+
+        # Inclusive window of `months` calendar months ending at current month (PT not needed)
+        today = date.today().replace(day=1)
+        # months=12 → oldest = today - 11 months
+        y, m = today.year, today.month - (months - 1)
+        while m <= 0:
+            m += 12
+            y -= 1
+        oldest = date(y, m, 1)
+
+        params: dict = {
+            "oldest": oldest,
+            "default_priority": default_priority,
+        }
+        cat_sql = ""
+        if category_ids:
+            cat_sql = "AND c.category_id = ANY(:cats)"
+            params["cats"] = category_ids
+
+        # Best rank in window; channels with no ranked rows → default
+        sql = f"""
+        WITH best AS (
+            SELECT
+                cs.channel_id,
+                MIN(cs.pv_score_rank) AS priority
+            FROM channel_stat AS cs
+            WHERE cs.report_period >= :oldest
+              AND cs.pv_score_rank IS NOT NULL
+            GROUP BY cs.channel_id
+        ),
+        target AS (
+            SELECT c.channel_id
+            FROM channel AS c
+            WHERE c.status = 1
+              {cat_sql}
+        ),
+        updates AS (
+            SELECT
+                t.channel_id,
+                COALESCE(b.priority, :default_priority) AS priority
+            FROM target AS t
+            LEFT JOIN best AS b ON b.channel_id = t.channel_id
+        )
+        UPDATE channel AS c
+        SET priority = u.priority
+        FROM updates AS u
+        WHERE c.channel_id = u.channel_id
+          AND c.priority IS DISTINCT FROM u.priority
+        """
+
+        async with async_session_maker() as session:
+            before = await session.execute(
+                text(
+                    f"""
+                    SELECT
+                      count(*) FILTER (WHERE priority <= 20) AS p20,
+                      count(*) FILTER (WHERE priority <= 100) AS p100,
+                      count(*) AS total
+                    FROM channel c
+                    WHERE status = 1 {cat_sql}
+                    """
+                ),
+                params,
+            )
+            before_row = before.mappings().one()
+
+            result = await session.execute(text(sql), params)
+            await session.commit()
+            updated = result.rowcount
+
+            after = await session.execute(
+                text(
+                    f"""
+                    SELECT
+                      count(*) FILTER (WHERE priority <= 20) AS p20,
+                      count(*) FILTER (WHERE priority <= 100) AS p100,
+                      count(*) AS total,
+                      min(priority) AS min_p,
+                      max(priority) AS max_p
+                    FROM channel c
+                    WHERE status = 1 {cat_sql}
+                    """
+                ),
+                params,
+            )
+            after_row = after.mappings().one()
+
+        stats = {
+            "months": months,
+            "oldest": oldest.isoformat(),
+            "category_ids": category_ids,
+            "updated": updated,
+            "before": dict(before_row),
+            "after": dict(after_row),
+        }
+        logger.info(
+            f"channel.sync_priority: months={months} oldest={oldest} "
+            f"cats={category_ids} updated={updated} "
+            f"after min/max={after_row['min_p']}/{after_row['max_p']} "
+            f"p<=20={after_row['p20']} p<=100={after_row['p100']}"
+        )
+        return stats
 
 
 class ChannelStatDAO(BaseDAO):
@@ -809,25 +1098,28 @@ class ChannelStatDAO(BaseDAO):
                 continue
 
             import app.api.ytapi as yt
+            from app.api import yt_pending
 
             data = yt.channel_list(current_channel_ids, obj_type="stat")
 
             if data:
                 for item in data:
                     item["report_period"] = report_period
-                if _raw_is_bq():
-                    from app.channel.dao_bq import ChannelStatBqDAO
-
-                    await ChannelStatBqDAO.add_bulk(data)
-                else:
-                    await cls.add_bulk(data)
-                total_updated += len(data)
-                if category_id is not None:
-                    logger.info(
-                        f"{i}: Updated {len(data)} records for category {category_id}"
-                    )
-                else:
-                    logger.info(f"Updated {len(data)} records")
+                period_key = (
+                    report_period.strf("%p")
+                    if hasattr(report_period, "strf")
+                    else str(report_period)[:7]
+                )
+                scope = f"cat{category_id}_{period_key}"
+                ok = await yt_pending.commit_rows("channel_stat", data, scope=scope)
+                if ok:
+                    total_updated += len(data)
+                    if category_id is not None:
+                        logger.info(
+                            f"{i}: Updated {len(data)} records for category {category_id}"
+                        )
+                    else:
+                        logger.info(f"Updated {len(data)} records")
 
         logger.info(f"Total updated channels: {total_updated}")
         return total_updated

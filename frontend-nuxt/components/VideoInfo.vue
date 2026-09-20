@@ -27,7 +27,10 @@ function formattedDate(dateStr) {
                 </a>
                 <img v-if="isThumbnailVisible" :src="video.thumbnail_url" class="absolute w-80 z-10 left-8" alt="">
             </div>
-            <div v-if="video.published_at" class="text-xs text-gray-500 ml-2">
+            <div v-if="video.channel_title" class="text-xs text-gray-500 ml-1 shrink-0">
+                · {{ video.channel_title }}
+            </div>
+            <div v-if="video.published_at" class="text-xs text-gray-500 ml-2 shrink-0">
                 {{ formattedDate(video.published_at) }}
             </div>
         </div>

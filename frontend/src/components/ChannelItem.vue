@@ -152,9 +152,9 @@ watch(
         </div>
       </div>
 
-      <div class="relative">
+      <div class="relative h-10 w-10 md:h-16 md:w-16 shrink-0 overflow-hidden rounded-sm border border-gray-300">
         <img
-          class="h-10 w-10 md:h-16 md:w-16 rounded-sm border border-gray-300 cursor-pointer hover:opacity-80"
+          class="h-full w-full max-w-none object-cover cursor-pointer hover:opacity-80"
           :src="logoSrc"
           :alt="item.channel_title"
           :title="'Клик — скопировать ID\n' + item.channel_title + '\n' + item.custom_url + '\n' + item.channel_id"

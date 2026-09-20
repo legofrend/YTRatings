@@ -117,6 +117,8 @@ cd yt_fetcher
 python -m app.main channel-stat --cats 1
 python -m app.main videos --cats 1
 python -m app.main video-stat --cats 1
-python -m app.main publish --cats 1
+python -m app.main backfill-denorm --period 2026-08
+python -m app.main backfill-channel-denorm --period 2026-08
 # --force: перезаписать channel/video stat, не только missing
+# publish (report JSONB) obsolete — frontend uses v2 channel_stat/video_stat
 ```

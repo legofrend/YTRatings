@@ -97,6 +97,8 @@ class PlaylistShortsDAO(BaseDAO):
         max_result: int = 5000,
     ) -> int | None:
         """Fetch UUSH playlist into playlist_shorts. Returns row count, 0 if empty, None on DB error."""
+        from app.api import yt_pending
+
         items = yt.playlistitem_list(
             channel_id,
             date_from=date_from,
@@ -109,7 +111,9 @@ class PlaylistShortsDAO(BaseDAO):
             return 0
 
         rows = cls._to_rows(items)
-        ok = await cls.add_update_bulk(rows)
+        ok = await yt_pending.commit_rows(
+            "playlist_shorts", rows, scope=channel_id
+        )
         if not ok:
             logger.error(f"Failed to upsert {len(rows)} shorts for {channel_id}")
             return None
@@ -154,10 +158,30 @@ class PlaylistShortsDAO(BaseDAO):
 
         for index, channel in enumerate(channels, start=1):
             channel_id = channel["channel_id"]
-            logger.info(f"{index}/{total}: {channel_id}")
+            last = channel.get("last_shorts_fetch_dt")
+            # Cold channel: pull same 3-mo window as video cold-start.
+            # Incremental: resume from last marker (still capped by date_to).
+            if last is None:
+                to_d = date_to.date() if isinstance(date_to, datetime) else date_to
+                from app.period import Period
+
+                ch_from = datetime.combine(
+                    Period(to_d.month, to_d.year).next(-3), datetime.min.time()
+                )
+            else:
+                ch_from = last if isinstance(last, datetime) else datetime.combine(
+                    last, datetime.min.time()
+                )
+            if ch_from >= date_to:
+                logger.info(f"{index}/{total}: {channel_id} - skipped (up to date)")
+                continue
+
+            logger.info(
+                f"{index}/{total}: {channel_id} window=[{ch_from} .. {date_to})"
+            )
             count = await cls.sync_from_playlist(
                 channel_id,
-                date_from=date_from,
+                date_from=ch_from,
                 date_to=date_to,
                 max_result=max_result,
             )

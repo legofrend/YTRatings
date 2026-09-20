@@ -132,7 +132,11 @@ class ReportDAO(BaseDAO):
         top_n: int = 5,
         rank_limit: int = 100,
     ) -> bool:
-        """Upsert report JSON in Postgres via sql/build_report_pg.sql (one category at a time)."""
+        """OBSOLETE: upsert nested report JSONB (legacy /ytr/report).
+
+        Frontend uses FastAPI v2 from channel_stat/video_stat; do not call in
+        the monthly pipeline. Kept for one-off rebuilds of the report table.
+        """
         if isinstance(category_ids, int):
             category_ids = [category_ids]
         if not category_ids:

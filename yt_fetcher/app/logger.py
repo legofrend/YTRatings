@@ -101,11 +101,14 @@ def save_errors(errors, type: str):
         with open(filename, "w", encoding="utf-8") as file:
             file.write(errors)
         return True
+    # Cap size — dumping 5k-row batches froze the machine last run
+    if isinstance(errors, list) and len(errors) > 50:
+        errors = errors[:50]
     try:
         save_json_csv(errors, filename)
     except Exception as e:
         with open(filename, "w", encoding="utf-8") as file:
-            file.write(str(errors))
+            file.write(str(errors)[:20000])
     return True
 
 

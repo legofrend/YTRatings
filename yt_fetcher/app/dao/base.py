@@ -10,8 +10,36 @@ from app.logger import logger, save_errors
 LIMIT = 1000  # Было 500
 
 
-def _format_sql_literal(value) -> str:
+def _format_sql_literal(value, sa_type=None) -> str:
+    """Format a Python value as a SQL literal; cast NULLs when sa_type is known (PG VALUES)."""
     if value is None:
+        if sa_type is not None:
+            from sqlalchemy import (
+                Boolean,
+                Date,
+                DateTime,
+                Float,
+                Integer,
+                BigInteger,
+                SmallInteger,
+                String,
+                Text,
+            )
+
+            if isinstance(sa_type, Boolean):
+                return "NULL::boolean"
+            if isinstance(sa_type, (Integer, SmallInteger)):
+                return "NULL::integer"
+            if isinstance(sa_type, BigInteger):
+                return "NULL::bigint"
+            if isinstance(sa_type, Float):
+                return "NULL::double precision"
+            if isinstance(sa_type, DateTime):
+                return "NULL::timestamp"
+            if isinstance(sa_type, Date):
+                return "NULL::date"
+            if isinstance(sa_type, (String, Text)):
+                return "NULL::text"
         return "NULL"
     # bool before int — bool is a subclass of int in Python
     if isinstance(value, bool):
@@ -24,6 +52,26 @@ def _format_sql_literal(value) -> str:
         return f"'{value.isoformat()}'"
     s = str(value).replace("'", "''")
     return f"'{s}'"
+
+
+def _dedupe_by_gid(data: list[dict], gid: str) -> list[dict]:
+    """Keep last row per gid — PG ON CONFLICT DO UPDATE rejects duplicate keys in one INSERT."""
+    if not data:
+        return data
+    by_id: dict = {}
+    order: list = []
+    for row in data:
+        key = row.get(gid)
+        if key is None:
+            continue
+        if key not in by_id:
+            order.append(key)
+        by_id[key] = row
+    if len(by_id) < len(data):
+        logger.warning(
+            f"dedupe_by_gid: {len(data)} → {len(by_id)} rows (dropped {len(data) - len(by_id)} dupes on {gid})"
+        )
+    return [by_id[k] for k in order]
 
 
 class BaseDAO:
@@ -126,58 +174,78 @@ class BaseDAO:
         if not data:
             return False
 
-        try:
-            # Подготовка данных для пакетного обновления
-            stmt = insert(cls.model).values(data)
-
-            if do_nothing:
-                stmt = stmt.on_conflict_do_nothing(index_elements=[cls.gid])
-                stmt = stmt.returning(cls.model.id)
-            else:
-                pk_names = {c.name for c in cls.model.__table__.primary_key.columns}
-                update_cols = [
-                    c.name
-                    for c in cls.model.__table__.columns
-                    if c.name != cls.gid and c.name not in pk_names
-                ]
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=[cls.gid],
-                    set_={k: getattr(stmt.excluded, k) for k in update_cols},
-                )
-                stmt = stmt.returning(
-                    cls.model.id,
-                    literal_column("(xmax = 0)", type_=Boolean).label("inserted"),
-                )
-
-            async with async_session_maker() as session:
-                result = await session.execute(stmt)
-                await session.commit()
-
-                if do_nothing:
-                    # В режиме do_nothing возвращаемые id - это вставленные записи
-                    inserted = [row.id for row in result]
-                    skipped = len(data) - len(inserted)
-                    msg = f"Added {len(inserted)} records in {cls.model.__tablename__}"
-                    if skipped > 0:
-                        msg += f", {skipped} skipped"
-                else:
-                    inserted = []
-                    updated = []
-                    for row in result.mappings():
-                        if row["inserted"]:
-                            inserted.append(row["id"])
-                        else:
-                            updated.append(row["id"])
-                    msg = f"Added {len(inserted)} and updated {len(updated)} records in {cls.model.__tablename__}"
-
-                logger.info(msg)
-
-        except Exception as e:
-            logger.error(f"Error in bulk update: {str(e)}")
-            save_errors(data, cls.model.__tablename__)
+        data = _dedupe_by_gid(data, cls.gid)
+        if not data:
             return False
 
-        return True
+        total_inserted = 0
+        total_updated = 0
+        total_skipped = 0
+        any_ok = False
+
+        for i in range(0, len(data), LIMIT):
+            part = data[i : i + LIMIT]
+            try:
+                stmt = insert(cls.model).values(part)
+
+                if do_nothing:
+                    stmt = stmt.on_conflict_do_nothing(index_elements=[cls.gid])
+                    stmt = stmt.returning(cls.model.id)
+                else:
+                    pk_names = {c.name for c in cls.model.__table__.primary_key.columns}
+                    update_cols = [
+                        c.name
+                        for c in cls.model.__table__.columns
+                        if c.name != cls.gid and c.name not in pk_names
+                    ]
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=[cls.gid],
+                        set_={k: getattr(stmt.excluded, k) for k in update_cols},
+                    )
+                    stmt = stmt.returning(
+                        cls.model.id,
+                        literal_column("(xmax = 0)", type_=Boolean).label("inserted"),
+                    )
+
+                async with async_session_maker() as session:
+                    result = await session.execute(stmt)
+                    await session.commit()
+
+                    if do_nothing:
+                        inserted = [row.id for row in result]
+                        total_inserted += len(inserted)
+                        total_skipped += len(part) - len(inserted)
+                    else:
+                        for row in result.mappings():
+                            if row["inserted"]:
+                                total_inserted += 1
+                            else:
+                                total_updated += 1
+                    any_ok = True
+
+            except Exception as e:
+                logger.error(
+                    f"Error in bulk update batch {i}-{i + len(part)}/{len(data)}: {e}",
+                    extra={"table": cls.model.__tablename__},
+                    exc_info=True,
+                )
+                # Cap dump — full 5k batches froze disk/terminals last time
+                save_errors(part[:50], cls.model.__tablename__)
+                return False
+
+        if do_nothing:
+            msg = (
+                f"Added {total_inserted} records in {cls.model.__tablename__}"
+            )
+            if total_skipped:
+                msg += f", {total_skipped} skipped"
+        else:
+            msg = (
+                f"Added {total_inserted} and updated {total_updated} records "
+                f"in {cls.model.__tablename__}"
+            )
+        logger.info(msg)
+        return any_ok
 
     @classmethod
     async def add_bulk(cls, data: list[dict]) -> list:
@@ -258,10 +326,15 @@ class BaseDAO:
                     # Создаем VALUES конструкцию для временной таблицы
                     # Нужны все колонки, включая identifier, так как они используются в FROM
                     cols = list(part_data[0].keys())
+                    table_cols = cls.model.__table__.columns
                     values = []
                     for record in part_data:
                         formatted_values = [
-                            _format_sql_literal(record.get(k)) for k in cols
+                            _format_sql_literal(
+                                record.get(k),
+                                table_cols[k].type if k in table_cols else None,
+                            )
+                            for k in cols
                         ]
                         values.append(f"({', '.join(formatted_values)})")
 

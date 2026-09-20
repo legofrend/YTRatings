@@ -15,6 +15,7 @@ import requests
 
 from app.logger import logger
 from app.config import settings
+from app.api import yt_quota
 
 from googleapiclient.errors import HttpError
 
@@ -30,6 +31,8 @@ DATETIME_YT_F = "%Y-%m-%dT%H:%M:%SZ"
 DATETIME_YT_F2 = "%Y-%m-%dT%H:%M:%S.%fZ"
 
 IS_QUOTA_EXCEEDED = False
+
+yt_quota.ensure_loaded()
 
 OrderType = Literal["date", "rating", "relevance", "title", "videoCount", "viewCount"]
 PlaylistKind = Literal["uploads", "shorts"]
@@ -125,10 +128,12 @@ def search_list(
     while True:
         try:
             response = youtube.search().list(q=query, **params).execute()
+            yt_quota.add("search.list")
             d = parse_response(response, type=type)
             data.extend(d)
         except HttpError as e:
             if e.resp.status == 403 and "quotaExceeded" in str(e):
+                yt_quota.add("search.list")
                 logger.error(
                     "YouTube API quota exceeded",
                     extra={"query": query, "params": params, "response": response},
@@ -205,6 +210,7 @@ def playlistitem_list(
                 params["pageToken"] = next_page_token
 
             response = youtube.playlistItems().list(**params).execute()
+            yt_quota.add("playlistItems.list")
 
             # Parse items
             for item in response.get("items", []):
@@ -254,6 +260,7 @@ def playlistitem_list(
                 )
                 return data
             if e.resp.status == 403 and "quotaExceeded" in str(e):
+                yt_quota.add("playlistItems.list")
                 logger.error(
                     "YouTube API quota exceeded",
                     extra={"playlist_id": playlist_id, "error": str(e)},
@@ -280,25 +287,79 @@ def playlistitem_list(
 
 
 def channel_or_video_list(
-    ids: list | str,
-    obj_type: Literal["channel_stat", "video_stat", "channel_detail", "video_detail"],
+    ids: list | str | None = None,
+    obj_type: Literal["channel_stat", "video_stat", "channel_detail", "video_detail"] = "channel_detail",
+    *,
+    handles: list[str] | str | None = None,
 ):
+    """
+    Fetch channels or videos by id.
+
+    Channel lookups also accept YouTube handles via `handles` / auto-detect in `ids`
+    (values not starting with UC… → forHandle, one API call each).
+    """
     global IS_QUOTA_EXCEEDED
     if IS_QUOTA_EXCEEDED:
         raise QuotaExceededException("YouTube API quota exceeded")
 
+    if ids is None:
+        ids = []
     if isinstance(ids, str):
         ids = [ids]
+    if handles is None:
+        handles = []
+    if isinstance(handles, str):
+        handles = [handles]
+
+    id_list: list[str] = []
+    handle_list: list[str] = []
+    for raw in list(ids) + list(handles):
+        if raw is None:
+            continue
+        s = str(raw).strip()
+        if not s:
+            continue
+        # URL → handle or channel id
+        if "youtube.com/" in s or "youtu.be/" in s:
+            if "/channel/" in s:
+                s = s.split("/channel/", 1)[1].split("/", 1)[0].split("?", 1)[0]
+            elif "/@" in s:
+                s = s.split("/@", 1)[1].split("/", 1)[0].split("?", 1)[0]
+            elif "@" in s:
+                s = s.split("@", 1)[1].split("/", 1)[0].split("?", 1)[0]
+        if s.startswith("@"):
+            s = s[1:]
+        if not s:
+            continue
+        if obj_type.startswith("channel_") and not s.startswith("UC"):
+            handle_list.append(s)
+        else:
+            id_list.append(s)
+
+    # de-dupe preserve order
+    def _uniq(seq: list[str]) -> list[str]:
+        seen: set[str] = set()
+        out: list[str] = []
+        for x in seq:
+            k = x.lower() if not x.startswith("UC") else x
+            if k in seen:
+                continue
+            seen.add(k)
+            out.append(x)
+        return out
+
+    id_list = _uniq(id_list)
+    handle_list = _uniq(handle_list)
 
     data = []
-    iter = 0
+    response = None
+
+    # --- by channel/video id (batches of 50) ---
     step = 50
-    response = None  # Initialize response variable
-
-    while iter < len(ids):
+    iter_i = 0
+    while iter_i < len(id_list):
         try:
-            part_ids = ",".join(ids[iter : (iter + step)])
-
+            part_ids = ",".join(id_list[iter_i : (iter_i + step)])
             data_dt = datetime.now()
             if obj_type in ("channel_stat", "channel_detail"):
                 response = (
@@ -306,21 +367,25 @@ def channel_or_video_list(
                     .list(id=part_ids, part="snippet,statistics,contentDetails")
                     .execute()
                 )
+                yt_quota.add("channels.list")
             elif obj_type in ("video_stat", "video_detail"):
                 response = (
                     youtube.videos()
                     .list(id=part_ids, part="statistics,contentDetails")
                     .execute()
                 )
-
-            # logger.debug("Get stat", extra={"obj_type": obj_type, "response": response})
+                yt_quota.add("videos.list")
             response["data_dt"] = data_dt
-            d = parse_response(response, type=obj_type)
-            data.extend(d)
-
-            iter += step
+            data.extend(parse_response(response, type=obj_type))
+            iter_i += step
         except HttpError as e:
             if e.resp.status == 403 and "quotaExceeded" in str(e):
+                op = (
+                    "channels.list"
+                    if obj_type.startswith("channel_")
+                    else "videos.list"
+                )
+                yt_quota.add(op)
                 logger.error(
                     "YouTube API quota exceeded",
                     extra={"obj_type": obj_type, "response": response},
@@ -328,7 +393,13 @@ def channel_or_video_list(
                 )
                 IS_QUOTA_EXCEEDED = True
                 return data
-        except Exception as e:
+            logger.error(
+                "Can't execute list",
+                extra={"obj_type": obj_type, "response": response},
+                exc_info=True,
+            )
+            break
+        except Exception:
             logger.error(
                 "Can't execute list",
                 extra={"obj_type": obj_type, "response": response},
@@ -336,14 +407,59 @@ def channel_or_video_list(
             )
             break
 
+    # --- by handle (API: one forHandle per request) ---
+    if handle_list and not obj_type.startswith("channel_"):
+        logger.warning("handles ignored for non-channel obj_type=%s", obj_type)
+        handle_list = []
+
+    for handle in handle_list:
+        if IS_QUOTA_EXCEEDED:
+            break
+        try:
+            data_dt = datetime.now()
+            response = (
+                youtube.channels()
+                .list(forHandle=handle, part="snippet,statistics,contentDetails")
+                .execute()
+            )
+            yt_quota.add("channels.list")
+            response["data_dt"] = data_dt
+            got = parse_response(response, type=obj_type)
+            if not got:
+                logger.warning(f"forHandle={handle}: not found")
+            data.extend(got)
+        except HttpError as e:
+            if e.resp.status == 403 and "quotaExceeded" in str(e):
+                yt_quota.add("channels.list")
+                logger.error(
+                    "YouTube API quota exceeded",
+                    extra={"obj_type": obj_type, "handle": handle},
+                    exc_info=True,
+                )
+                IS_QUOTA_EXCEEDED = True
+                break
+            logger.error(
+                f"Can't execute channels.list forHandle={handle}",
+                exc_info=True,
+            )
+        except Exception:
+            logger.error(
+                f"Can't execute channels.list forHandle={handle}",
+                exc_info=True,
+            )
+
     return data
 
 
 def channel_list(
-    ids: list | str,
-    obj_type: Literal["stat", "detail"],
+    ids: list | str | None = None,
+    obj_type: Literal["stat", "detail"] = "detail",
+    *,
+    handles: list[str] | str | None = None,
 ):
-    return channel_or_video_list(ids, obj_type="channel_" + obj_type)
+    return channel_or_video_list(
+        ids, obj_type="channel_" + obj_type, handles=handles
+    )
 
 
 def video_list(
@@ -507,7 +623,8 @@ def choose_proxy(
                 return None
 
 
-async def check_short(video: dict, proxy: str = None):
+async def check_short_http_old(video: dict, proxy: str = None):
+    """LEGACY HTTP probe. Do not use — prefer UUSH + apply-is-short."""
     video_id = video["video_id"]
     url = f"https://www.youtube.com/shorts/{video_id}"
 
@@ -570,7 +687,8 @@ def _print_shorts_progress(done: int, total: int, start: float) -> None:
     sys.stdout.flush()
 
 
-async def check_shorts(data: list[dict]):
+async def check_shorts_http_old(data: list[dict]):
+    """LEGACY batch HTTP is_short. Do not use — prefer shorts-sync + apply-is-short."""
     tasks = []
     limit = 3  # Уменьшили с 10 до 3 для снижения нагрузки
     proxy = None
@@ -580,7 +698,7 @@ async def check_shorts(data: list[dict]):
 
     for item in data:
         if item.get("is_short") is None or item.get("is_short") == "":
-            tasks.append(check_short(item, proxy))
+            tasks.append(check_short_http_old(item, proxy))
 
     if not tasks:
         return []
@@ -616,7 +734,8 @@ async def check_shorts(data: list[dict]):
     return results
 
 
-async def check_short_old(video_id: str):
+async def check_short_http_old_v1(video_id: str):
+    """Even older HTTP variant (status as 0/1)."""
     url = f"https://www.youtube.com/shorts/{video_id}"
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as response:
@@ -636,12 +755,13 @@ async def check_short_old(video_id: str):
             return is_short, url
 
 
-def check_shorts_sync(video_ids: list[str]):
+def check_shorts_sync_http_old(video_ids: list[str]):
+    """LEGACY sync wrapper. Do not use."""
 
     import time
 
     async def main(video_ids):
-        tasks = [check_short(video_id) for video_id in video_ids]
+        tasks = [check_short_http_old_v1(video_id) for video_id in video_ids]
         return await asyncio.gather(*tasks)
 
     step = 100
@@ -658,6 +778,34 @@ def check_shorts_sync(video_ids: list[str]):
 
     return data
 
+
+
+
+# Guard: old public names must not run accidentally
+def check_shorts(*_a, **_k):
+    raise RuntimeError(
+        "ytapi.check_shorts (HTTP) is disabled; use shorts-sync + apply-is-short. "
+        "Legacy impl: check_shorts_http_old"
+    )
+
+
+def check_short(*_a, **_k):
+    raise RuntimeError(
+        "ytapi.check_short (HTTP) is disabled; use shorts-sync + apply-is-short. "
+        "Legacy impl: check_short_http_old"
+    )
+
+
+def check_shorts_sync(*_a, **_k):
+    raise RuntimeError(
+        "ytapi.check_shorts_sync (HTTP) is disabled. Legacy: check_shorts_sync_http_old"
+    )
+
+
+def check_short_old(*_a, **_k):
+    raise RuntimeError(
+        "ytapi.check_short_old is disabled. Legacy: check_short_http_old_v1"
+    )
 
 # playlist_id = contentDetails.relatedPlaylists.uploads
 # check_is_short()

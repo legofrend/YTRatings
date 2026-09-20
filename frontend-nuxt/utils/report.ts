@@ -1,9 +1,37 @@
+/** Map flat video_stat row → UI VideoInfo shape. */
+export function mapVideo(v: Record<string, any>) {
+  return {
+    video_id: v.video_id,
+    channel_id: v.channel_id,
+    channel_title: v.channel_title,
+    custom_url: v.custom_url,
+    title: v.title,
+    is_short: v.is_short ? 1 : 0,
+    is_clickbait: v.is_clickbait ? 1 : 0,
+    clickbait_comment: v.clickbait_comment,
+    video_url: v.video_url,
+    thumbnail_url: v.thumbnail_url,
+    published_at: v.published_at,
+    stat: {
+      duration: v.duration,
+      score: v.score,
+      view_count: v.period_view_count,
+      like_count: v.period_like_count,
+      comment_count: v.period_comment_count,
+    },
+  }
+}
+
 /** Map flat channel_stat row → UI shape with nested `stat`. */
 export function mapChannel(ch: Record<string, any>) {
   const viewCount = ch.pv_view || 0
   const likeShare = viewCount > 0 ? ((ch.pv_like || 0) / viewCount) * 100 : 0
   const commentShare =
     viewCount > 0 ? ((ch.pv_comment || 0) / viewCount) * 100 : 0
+
+  const topVideos = Array.isArray(ch.top_videos)
+    ? ch.top_videos.map(mapVideo)
+    : null
 
   return {
     channel_id: ch.channel_id,
@@ -14,7 +42,7 @@ export function mapChannel(ch: Record<string, any>) {
     category_id: ch.category_id,
     rank: ch.rank,
     rank_change: ch.rank_change != null ? -ch.rank_change : 0,
-    top_videos: null as any[] | null,
+    top_videos: topVideos as any[] | null,
     videos_loading: false,
     videos_error: null as string | null,
     history: null as any[] | null,

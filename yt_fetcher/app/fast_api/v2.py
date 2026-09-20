@@ -35,6 +35,18 @@ async def list_channels(
         None, description="Report period YYYY-MM-DD; default = latest available"
     ),
     limit: int = Query(20, ge=1, le=100, description="Top N channels"),
+    videos_limit: int = Query(
+        0,
+        ge=0,
+        le=20,
+        description="If >0, attach top N new videos for first videos_for channels",
+    ),
+    videos_for: int = Query(
+        10,
+        ge=0,
+        le=50,
+        description="How many top channels get embedded videos (when videos_limit>0)",
+    ),
 ):
     """Top channels for category+period from channel_stat JOIN channel."""
     if period:
@@ -53,29 +65,72 @@ async def list_channels(
     if not channels:
         raise HTTPException(status_code=404, detail="No channels for category/period")
 
+    if videos_limit > 0 and videos_for > 0:
+        ids = [c["channel_id"] for c in channels[:videos_for] if c.get("channel_id")]
+        by_ch = await VideoStatDAO.top_for_channels(
+            channel_ids=ids,
+            report_period=report_period,
+            limit=videos_limit,
+        )
+        for ch in channels:
+            cid = ch.get("channel_id")
+            if cid in by_ch:
+                ch["top_videos"] = by_ch[cid]
+
     return {
         "category_id": category_id,
         "period": report_period.strf(),
         "limit": limit,
+        "videos_limit": videos_limit,
+        "videos_for": videos_for if videos_limit > 0 else 0,
         "channels": channels,
     }
 
 
 @router.get("/videos")
 async def list_videos(
-    channel_id: str = Query(..., description="YouTube channel id"),
     period: str = Query(..., description="Report period YYYY-MM-DD"),
+    channel_id: str | None = Query(None, description="YouTube channel id"),
+    category_id: int | None = Query(
+        None, description="Category id (top videos across category)"
+    ),
     limit: int = Query(10, ge=1, le=50, description="Top N videos"),
 ):
-    """Top new videos for channel+period from video_stat JOIN video."""
+    """Top new videos for channel+period, or category+period if channel omitted."""
+    if not channel_id and category_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Provide channel_id or category_id",
+        )
+    if channel_id and category_id is not None:
+        raise HTTPException(
+            status_code=422,
+            detail="Pass only one of channel_id or category_id",
+        )
+
     report_period = Period.parse(period)
-    videos = await VideoStatDAO.top_for_channel(
-        channel_id=channel_id,
+    if channel_id:
+        videos = await VideoStatDAO.top_for_channel(
+            channel_id=channel_id,
+            report_period=report_period,
+            limit=limit,
+        )
+        return {
+            "channel_id": channel_id,
+            "category_id": None,
+            "period": report_period.strf(),
+            "limit": limit,
+            "videos": videos,
+        }
+
+    videos = await VideoStatDAO.top_for_category(
+        category_id=category_id,
         report_period=report_period,
         limit=limit,
     )
     return {
-        "channel_id": channel_id,
+        "channel_id": None,
+        "category_id": category_id,
         "period": report_period.strf(),
         "limit": limit,
         "videos": videos,

@@ -104,6 +104,11 @@ export default defineNuxtConfig({
   compatibilityDate: '2025-01-01',
   ssr: true,
 
+  // Avoid empty/broken Vite client when #app-manifest virtual module races
+  experimental: {
+    appManifest: false,
+  },
+
   modules: ['@nuxtjs/tailwindcss'],
 
   css: ['~/assets/css/main.css'],
@@ -119,13 +124,19 @@ export default defineNuxtConfig({
   app: {
     head: {
       htmlAttrs: { lang: 'ru' },
-      title: 'Рейтинг YouTube каналов',
+      title: 'Рейтинг ютуб каналов в России и в мире — YTRatings',
       meta: [
         { charset: 'utf-8' },
         { name: 'viewport', content: 'width=device-width, initial-scale=1' },
         {
           name: 'description',
-          content: 'Ежемесячный рейтинг YouTube-каналов по категориям',
+          content:
+            'Топ рейтинг ютуб (YouTube) каналов в России и в мире: самые популярные каналы по просмотрам, подписчикам и динамике.',
+        },
+        {
+          name: 'keywords',
+          content:
+            'рейтинг ютуб каналов, топ рейтинг ютуб каналов, рейтинг ютуб каналов в россии, рейтинг ютуб каналов в мире, ютуб каналы рейтинг по подписчикам, рейтинг самых популярных каналов на ютубе, рейтинг youtube каналов',
         },
       ],
       link: [

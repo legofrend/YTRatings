@@ -4,6 +4,7 @@ import StatBlock from './StatBlock.vue';
 import VideoInfo from './VideoInfo.vue';
 import ChannelHistory from './ChannelHistory.vue';
 import { ref, watch, computed } from 'vue';
+import { mapVideo } from '~/utils/report';
 
 const props = defineProps({
     item: { type: Object, required: true },
@@ -16,22 +17,24 @@ const props = defineProps({
 });
 
 const { videos: fetchVideos, channelDynamics } = useYtrApi();
+const VIDEOS_STEP = 5;
+const VIDEOS_MAX = 20;
 
 const showDetails = ref(false);
 const copied = ref(false);
-const videosExpanded = ref(false);
+/** How many top videos to show (5 → 10 → 15 → 20). Fetch always pulls VIDEOS_MAX. */
+const videosLimit = ref(VIDEOS_STEP);
 const EMPTY_LOGO = '/img/empty.png';
 const logoImg = ref(null);
 const logoSrc = ref(localLogo(props.item) || props.item?.thumbnail_url || EMPTY_LOGO);
 const visibleVideos = computed(() => {
   const list = props.item.top_videos || [];
-  return videosExpanded.value ? list : list.slice(0, 5);
+  return list.slice(0, videosLimit.value);
 });
-const canExpandVideos = computed(
-  () =>
-    !videosExpanded.value &&
-    (props.item.top_videos?.length || 0) >= 5
-);
+const canExpandVideos = computed(() => {
+  const n = props.item.top_videos?.length || 0;
+  return videosLimit.value < Math.min(VIDEOS_MAX, n);
+});
 
 function localLogo(ch) {
   // absolute — иначе на вложенных URL уезжает в относительный путь
@@ -63,26 +66,6 @@ watch(
   }
 );
 
-function mapVideo(v) {
-  return {
-    video_id: v.video_id,
-    title: v.title,
-    is_short: v.is_short ? 1 : 0,
-    is_clickbait: v.is_clickbait ? 1 : 0,
-    clickbait_comment: v.clickbait_comment,
-    video_url: v.video_url,
-    thumbnail_url: v.thumbnail_url,
-    published_at: v.published_at,
-    stat: {
-      duration: v.duration,
-      score: v.score,
-      view_count: v.period_view_count,
-      like_count: v.period_like_count,
-      comment_count: v.period_comment_count,
-    },
-  };
-}
-
 async function copyChannelId() {
   try {
     await navigator.clipboard.writeText(props.item.channel_id);
@@ -96,14 +79,16 @@ async function copyChannelId() {
   }
 }
 
-async function loadVideos(limit = 5) {
+async function loadVideos() {
   if (!props.period) return;
-  // already have enough cached
+  // already pulled max (or confirmed fewer exist) for this open/period
+  if (props.item.videos_loaded_max && !props.item.videos_loading) return;
   if (
     props.item.top_videos != null &&
-    props.item.top_videos.length >= limit &&
+    props.item.top_videos.length >= VIDEOS_MAX &&
     !props.item.videos_loading
   ) {
+    props.item.videos_loaded_max = true;
     return;
   }
   if (props.item.videos_loading) return;
@@ -111,9 +96,10 @@ async function loadVideos(limit = 5) {
   props.item.videos_loading = true;
   props.item.videos_error = null;
   try {
-    // API: only limit, no offset — для «ещё» перезапрашиваем top 10
-    const res = await fetchVideos(props.item.channel_id, props.period, limit);
+    // one shot: fetch max, UI reveals by VIDEOS_STEP
+    const res = await fetchVideos(props.item.channel_id, props.period, VIDEOS_MAX);
     props.item.top_videos = (res.videos || []).map(mapVideo);
+    props.item.videos_loaded_max = true;
   } catch (err) {
     props.item.videos_error = err.message || String(err);
     props.item.top_videos = [];
@@ -122,9 +108,8 @@ async function loadVideos(limit = 5) {
   }
 }
 
-async function expandVideos() {
-  videosExpanded.value = true;
-  await loadVideos(10);
+function expandVideos() {
+  videosLimit.value = Math.min(videosLimit.value + VIDEOS_STEP, VIDEOS_MAX);
 }
 
 async function loadHistory() {
@@ -147,19 +132,19 @@ async function toggleDetails() {
   showDetails.value = !showDetails.value;
   if (!showDetails.value) return;
 
-  videosExpanded.value = false;
-  await loadVideos(5);
+  videosLimit.value = VIDEOS_STEP;
+  await loadVideos();
   await loadHistory();
 }
 
 watch(
   () => props.period,
   () => {
-    props.item.top_videos = null;
-    props.item.videos_error = null;
-    videosExpanded.value = false;
+    // Parent remaps channels (with/without preload). Don't wipe preloaded top_videos.
+    videosLimit.value = VIDEOS_STEP;
+    props.item.videos_loaded_max = false;
     if (showDetails.value) {
-      loadVideos(5).then(() => loadHistory());
+      loadVideos().then(() => loadHistory());
     }
   }
 );
@@ -185,10 +170,10 @@ watch(
         </div>
       </div>
 
-      <div class="relative">
+      <div class="relative h-10 w-10 md:h-16 md:w-16 shrink-0 overflow-hidden rounded-sm border border-gray-300">
         <img
           ref="logoImg"
-          class="h-10 w-10 md:h-16 md:w-16 rounded-sm border border-gray-300 cursor-pointer hover:opacity-80"
+          class="h-full w-full max-w-none object-cover cursor-pointer hover:opacity-80"
           :src="logoSrc"
           :alt="item.channel_title"
           :title="'Клик — скопировать ID\n' + item.channel_title + '\n' + item.custom_url + '\n' + item.channel_id"
@@ -258,7 +243,10 @@ watch(
       v-if="showDetails"
       class="text-xs w-auto p-2 ml-5 md:ml-32 -mt-4 shadow-lg bg-gray-50 rounded-lg text-black"
     >
-      <div v-if="item.videos_loading" class="flex items-center gap-2 p-3 text-gray-500">
+      <div
+        v-if="item.videos_loading && !item.top_videos?.length"
+        class="flex items-center gap-2 p-3 text-gray-500"
+      >
         <span
           class="inline-block h-5 w-5 rounded-full border-2 border-gray-300 border-t-blue-500 animate-spin"
         />
@@ -277,11 +265,11 @@ watch(
         <button
           v-if="canExpandVideos"
           type="button"
-          class="w-full mt-2 mb-1 py-3 text-3xl leading-none tracking-[0.35em] text-gray-600 border border-gray-400 rounded-md bg-white hover:bg-gray-100 hover:text-black"
-          title="Показать ещё"
+          class="mt-1 mb-0.5 mx-auto block px-2 py-0.5 text-xs text-gray-500 hover:text-black hover:underline"
+          title="Показать ещё 5 видео"
           @click="expandVideos"
         >
-          …
+          еще 5
         </button>
       </div>
 

@@ -206,6 +206,9 @@ WHERE cs.id = u.id and cs.ppcs_id>0
 ;
 
 -- step 6: update channel: priority
+-- OBSOLETE bucketed version (20/100/1000). Prefer CLI:
+--   python -m app.main sync-priority --months 12
+-- which sets priority = MIN(pv_score_rank) over the lookback window.
 with updates AS (
 select
     cs.channel_id,

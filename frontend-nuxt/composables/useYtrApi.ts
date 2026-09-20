@@ -26,11 +26,22 @@ export function useYtrApi() {
         limit: number
         channels: Record<string, any>[]
       }>('channels', {
-        query: { category_id: categoryId, period, limit },
+        query: {
+          category_id: categoryId,
+          period,
+          limit,
+          // SSG / archive: top-5 videos for top-10 channels (instant expand)
+          videos_limit: 5,
+          videos_for: 10,
+        },
       }),
     videos: (channelId: string, period: string, limit = 10) =>
       api<{ videos: Record<string, any>[] }>('videos', {
         query: { channel_id: channelId, period, limit },
+      }),
+    categoryVideos: (categoryId: number, period: string, limit = 5) =>
+      api<{ videos: Record<string, any>[] }>('videos', {
+        query: { category_id: categoryId, period, limit },
       }),
     channelDynamics: (channelId: string, months = 12) =>
       api<{ points: Record<string, any>[] }>('channel', {

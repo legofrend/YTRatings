@@ -176,6 +176,46 @@ class VideoDAO(BaseDAO):
             return data
 
     @classmethod
+    async def get_ids_wo_duration(
+        cls,
+        *,
+        category_ids: list[int] | int | None = None,
+    ) -> list[str]:
+        """video_id with duration IS NULL (status=1), optional category filter via channel."""
+        if isinstance(category_ids, int):
+            category_ids = [category_ids]
+
+        if _raw_is_bq():
+            # BQ path: fall back to generic null-duration ids (no cat filter yet)
+            return await cls.get_ids(filters={"duration": None, "status": 1})
+
+        async with async_session_maker() as session:
+            if category_ids:
+                q = text(
+                    """
+                    SELECT v.video_id
+                    FROM video v
+                    JOIN channel c ON c.channel_id = v.channel_id
+                    WHERE v.status = 1
+                      AND v.duration IS NULL
+                      AND c.category_id = ANY(:cats)
+                    ORDER BY v.video_id
+                    """
+                )
+                result = await session.execute(q, {"cats": category_ids})
+            else:
+                q = text(
+                    """
+                    SELECT v.video_id
+                    FROM video v
+                    WHERE v.status = 1 AND v.duration IS NULL
+                    ORDER BY v.video_id
+                    """
+                )
+                result = await session.execute(q)
+            return list(result.scalars().all())
+
+    @classmethod
     async def get_ids_wo_is_short(
         cls,
         category_id: int = None,
@@ -200,42 +240,74 @@ class VideoDAO(BaseDAO):
             return data
 
     @classmethod
-    async def update_detail(cls, video_ids: list[str] | str = None, *, skip_shorts: bool = False):
+    async def update_detail(
+        cls,
+        video_ids: list[str] | str = None,
+        *,
+        category_ids: list[int] | int | None = None,
+        skip_shorts: bool = True,
+    ):
+        """
+        Fill duration (and related detail) via videos.list.
+        skip_shorts kept for API compat; HTTP is_short is disabled — use apply-is-short.
+        """
         import app.api.ytapi as yt
 
+        if isinstance(video_ids, str):
+            video_ids = [video_ids]
+
         if not video_ids:
-            video_ids = await cls.get_ids(
-                filters={
-                    "duration": None,
-                    "status": 1,
-                    # "published_at_period": date(2025, 3, 1),
-                }
+            video_ids = await cls.get_ids_wo_duration(category_ids=category_ids)
+            logger.info(
+                f"Found videos without duration: {len(video_ids)} "
+                f"cats={category_ids}"
             )
-            logger.info(f"Found videos without duration: {len(video_ids)}")
             if not video_ids:
-                return None
+                return []
+        data = None
         try:
             data = yt.video_list(video_ids, obj_type="detail")
-            logger.info(f"Fetched videos: {len(video_ids)}")
+            logger.info(f"Fetched videos: {len(data) if data else 0}")
             if not data:
                 return None
-            if not skip_shorts:
-                await yt.check_shorts(data)
-            ok = await cls.update_bulk(data)
+            # HTTP check_shorts removed — is_short via playlist_shorts / apply-is-short
+            _ = skip_shorts
+            from app.api import yt_pending
+
+            if isinstance(category_ids, int):
+                scope = f"cat{category_ids}"
+            elif category_ids:
+                scope = "cat" + "_".join(str(c) for c in category_ids[:8])
+            else:
+                scope = "default"
+            ok = await yt_pending.commit_rows("video_detail", data, scope=scope)
             if ok:
                 logger.info(f"Updated videos: {len(data)}")
-            else:
-                logger.error(
-                    f"Partial/failed bulk update for {len(data)} videos; see logs/*_video_errors_.csv"
-                )
-        except:
+                return data
+            logger.error(
+                f"Partial/failed bulk update for {len(data)} videos; "
+                f"pending kept in logs/yt_pending/"
+            )
+            return None
+        except Exception:
             logger.error("Can't update video detail", exc_info=True)
-            dump_file = save_data_dump(data, "video_list_dump")
-            logger.info(f"Data dump saved: {dump_file}")
+            try:
+                if data:
+                    from app.api import yt_pending
 
-            save_errors(data, "video_detail")
-
-        return data
+                    scope = "default"
+                    yt_pending._save_pending(
+                        yt_pending.pending_path("video_detail", scope),
+                        {
+                            "op": "video_detail",
+                            "scope": scope,
+                            "meta": {},
+                            "rows": yt_pending._normalize_rows(data),
+                        },
+                    )
+            except Exception:
+                pass
+            return None
 
     @classmethod
     async def update_is_short_new(
@@ -328,7 +400,10 @@ class VideoDAO(BaseDAO):
         return {"set_true": n_true, "set_false": n_false}
 
     @classmethod
-    async def update_is_short(cls, video_list: list[str] = None, from_file: str = None):
+    async def update_is_short_http_old(
+        cls, video_list: list[str] = None, from_file: str = None
+    ):
+        """LEGACY HTTP is_short. Do not use — prefer update_is_short_new / apply-is-short."""
         import app.api.ytapi as yt
 
         if not video_list:
@@ -356,7 +431,7 @@ class VideoDAO(BaseDAO):
             logger.info(f"Found videos without is_short: {len(video_list)}")
 
         try:
-            await yt.check_shorts(video_list)
+            await yt.check_shorts_http_old(video_list)
             logger.info(f"Fetched info about videos: {len(video_list)}")
             try:
                 filename = "logs/list_filled.csv"
@@ -370,11 +445,18 @@ class VideoDAO(BaseDAO):
                 logger.error(
                     f"Partial/failed is_short bulk update for {len(video_list)} videos"
                 )
-        except:
-            logger.error("Can't update video detail", exc_info=True)
+        except Exception:
+            logger.error("Can't update video is_short (HTTP legacy)", exc_info=True)
             save_errors(video_list, "video_detail")
 
         return video_list
+
+    @classmethod
+    async def update_is_short(cls, *args, **kwargs):
+        raise RuntimeError(
+            "VideoDAO.update_is_short (HTTP) is disabled; use update_is_short_new "
+            "or `python -m app.main apply-is-short`. Legacy: update_is_short_http_old"
+        )
 
     @classmethod
     async def get_from_playlist(
@@ -385,13 +467,16 @@ class VideoDAO(BaseDAO):
         max_result: int = 500,
     ):
         import app.api.ytapi as yt
+        from app.api import yt_pending
 
         videos = yt.playlistitem_list(
             id, date_from=date_from, date_to=date_to, max_result=max_result
         )
         if videos:
-            await cls.add_update_bulk(videos, do_nothing=True)
-            return videos
+            ok = await yt_pending.commit_rows(
+                "video_insert", videos, scope=str(id)[:64]
+            )
+            return videos if ok else None
         return None
 
     @classmethod
@@ -401,6 +486,7 @@ class VideoDAO(BaseDAO):
         period: Period | tuple[datetime, datetime] = Period(),
     ):
         import app.api.ytapi as yt
+        from app.api import yt_pending
 
         if isinstance(period, Period):
             period = period.as_range()
@@ -418,8 +504,10 @@ class VideoDAO(BaseDAO):
                 max_result=500,
             )
             if videos:
-                await cls.add_update_bulk(videos, do_nothing=True)
-                return videos
+                ok = await yt_pending.commit_rows(
+                    "video_insert", videos, scope=channel_id
+                )
+                return videos if ok else None
 
         except Exception as e:
             logger.error(
@@ -568,6 +656,169 @@ class VideoStatDAO(BaseDAO):
                     item["score"] = int(round(float(item["score"])))
                 rows.append(item)
             return rows
+
+    @classmethod
+    async def top_for_category(
+        cls,
+        *,
+        category_id: int,
+        report_period: date | Period,
+        limit: int = 5,
+    ) -> list[dict]:
+        """Top new videos across a category for period (by score = views, shorts/10)."""
+        if isinstance(report_period, Period):
+            report_period = date(report_period.year, report_period.month, 1)
+
+        async with async_session_maker() as session:
+            result = await session.execute(
+                text(
+                    """
+                    SELECT
+                        v.video_id,
+                        v.channel_id,
+                        ch.channel_title,
+                        ch.custom_url,
+                        v.title,
+                        v.description,
+                        v.video_url,
+                        v.thumbnail_url,
+                        v.duration,
+                        v.published_at,
+                        v.is_clickbait,
+                        v.clickbait_comment,
+                        vs.report_period,
+                        vs.is_short,
+                        vs.is_new,
+                        vs.period_view_count,
+                        vs.period_like_count,
+                        vs.period_comment_count,
+                        vs.view_count,
+                        vs.like_count,
+                        vs.comment_count,
+                        CASE
+                            WHEN vs.is_short
+                            THEN COALESCE(vs.period_view_count, 0) / 10.0
+                            ELSE COALESCE(vs.period_view_count, 0)
+                        END AS score
+                    FROM video_stat AS vs
+                    JOIN video AS v ON v.video_id = vs.video_id
+                    JOIN channel AS ch ON ch.channel_id = vs.channel_id
+                    WHERE ch.category_id = :category_id
+                      AND ch.status = 1
+                      AND vs.report_period = :report_period
+                      AND vs.is_new IS TRUE
+                      AND COALESCE(v.status, 1) > 0
+                    ORDER BY
+                        score DESC,
+                        vs.is_short ASC NULLS FIRST
+                    LIMIT :limit
+                    """
+                ),
+                {
+                    "category_id": int(category_id),
+                    "report_period": report_period,
+                    "limit": int(limit),
+                },
+            )
+            rows = []
+            for row in result.mappings().all():
+                item = dict(row)
+                if item.get("report_period") is not None:
+                    item["report_period"] = item["report_period"].isoformat()
+                if item.get("published_at") is not None:
+                    item["published_at"] = item["published_at"].isoformat()
+                if item.get("score") is not None:
+                    item["score"] = int(round(float(item["score"])))
+                rows.append(item)
+            return rows
+
+    @classmethod
+    async def top_for_channels(
+        cls,
+        *,
+        channel_ids: list[str],
+        report_period: date | Period,
+        limit: int = 5,
+    ) -> dict[str, list[dict]]:
+        """Top `limit` new videos per channel for period. Returns {channel_id: [videos]}."""
+        if not channel_ids:
+            return {}
+        if isinstance(report_period, Period):
+            report_period = date(report_period.year, report_period.month, 1)
+
+        async with async_session_maker() as session:
+            result = await session.execute(
+                text(
+                    """
+                    WITH scored AS (
+                        SELECT
+                            v.video_id,
+                            v.channel_id,
+                            v.title,
+                            v.description,
+                            v.video_url,
+                            v.thumbnail_url,
+                            v.duration,
+                            v.published_at,
+                            v.is_clickbait,
+                            v.clickbait_comment,
+                            vs.report_period,
+                            vs.is_short,
+                            vs.is_new,
+                            vs.period_view_count,
+                            vs.period_like_count,
+                            vs.period_comment_count,
+                            vs.view_count,
+                            vs.like_count,
+                            vs.comment_count,
+                            CASE
+                                WHEN vs.is_short
+                                THEN COALESCE(vs.period_view_count, 0) / 10.0
+                                ELSE COALESCE(vs.period_view_count, 0)
+                            END AS score,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY v.channel_id
+                                ORDER BY
+                                    vs.is_short ASC NULLS FIRST,
+                                    CASE
+                                        WHEN vs.is_short
+                                        THEN COALESCE(vs.period_view_count, 0) / 10.0
+                                        ELSE COALESCE(vs.period_view_count, 0)
+                                    END DESC
+                            ) AS rn
+                        FROM video_stat AS vs
+                        JOIN video AS v ON v.video_id = vs.video_id
+                        WHERE vs.channel_id IN :channel_ids
+                          AND vs.report_period = :report_period
+                          AND vs.is_new IS TRUE
+                          AND COALESCE(v.status, 1) > 0
+                    )
+                    SELECT *
+                    FROM scored
+                    WHERE rn <= :limit
+                    ORDER BY channel_id, rn
+                    """
+                ).bindparams(bindparam("channel_ids", expanding=True)),
+                {
+                    "channel_ids": list(channel_ids),
+                    "report_period": report_period,
+                    "limit": int(limit),
+                },
+            )
+            out: dict[str, list[dict]] = {cid: [] for cid in channel_ids}
+            for row in result.mappings().all():
+                item = dict(row)
+                item.pop("rn", None)
+                if item.get("report_period") is not None:
+                    item["report_period"] = item["report_period"].isoformat()
+                if item.get("published_at") is not None:
+                    item["published_at"] = item["published_at"].isoformat()
+                if item.get("score") is not None:
+                    item["score"] = int(round(float(item["score"])))
+                cid = item.get("channel_id")
+                if cid in out:
+                    out[cid].append(item)
+            return out
 
     @classmethod
     async def backfill_denorm(
@@ -761,6 +1012,7 @@ class VideoStatDAO(BaseDAO):
                 continue
 
             import app.api.ytapi as yt
+            from app.api import yt_pending
 
             data = yt.video_list(current_video_ids, obj_type="stat")
             # data = []
@@ -775,26 +1027,30 @@ class VideoStatDAO(BaseDAO):
                     missing_payload = [
                         {"video_id": vid, "status": 0} for vid in missing_ids
                     ]
-                    if _raw_is_bq():
-                        from app.channel.video.dao_bq import VideoBqDAO
-
-                        await VideoBqDAO.update_bulk(missing_payload)
-                    else:
-                        await VideoDAO.update_bulk(missing_payload)
+                    await yt_pending.commit_rows(
+                        "video_status",
+                        missing_payload,
+                        scope=f"missing_cat{category_id}",
+                    )
 
                 for item in data:
                     item["report_period"] = report_period
-                if _raw_is_bq():
-                    from app.channel.video.dao_bq import VideoStatBqDAO
-
-                    await VideoStatBqDAO.add_bulk(data)
-                else:
-                    await cls.add_bulk(data)
-                total_updated += len(data)
-                if category_id != 0:  # Don't print for single video_ids case
-                    logger.info(
-                        f"{i}: Updated {len(data)} records for category {category_id}"
-                    )
+                period_key = (
+                    report_period.strftime("%Y-%m")
+                    if hasattr(report_period, "strftime")
+                    else str(report_period)[:7]
+                )
+                ok = await yt_pending.commit_rows(
+                    "video_stat",
+                    data,
+                    scope=f"cat{category_id}_{period_key}",
+                )
+                if ok:
+                    total_updated += len(data)
+                    if category_id != 0:  # Don't print for single video_ids case
+                        logger.info(
+                            f"{i}: Updated {len(data)} records for category {category_id}"
+                        )
 
         logger.info(f"Total updated videos: {total_updated}")
         return total_updated
