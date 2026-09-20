@@ -88,6 +88,23 @@ ssh root@o2t4.ru
 # или Host из ~/.ssh/config
 ```
 
+### Деплой с ПК (рекомендуется)
+
+```powershell
+# commit (если dirty) + push + Nuxt SSG + VPS docker rebuild + sync frontend/dist
+.\scripts\deploy-ytr.ps1 -CommitMessage "your message"
+
+# уже закоммичено:
+.\scripts\deploy-ytr.ps1 -SkipCommit
+
+# только фронт / только бэк:
+.\scripts\deploy-ytr.ps1 -SkipCommit -SkipDocker
+.\scripts\deploy-ytr.ps1 -SkipCommit -SkipGenerate -SkipFrontend
+```
+
+Git Bash / WSL: `./scripts/deploy-ytr.sh -m "..."`.  
+`channel_logo/` на VPS не затирается. SSG по умолчанию с `https://ytr.o2t4.ru/api/ytr/v2`.
+
 ### Типичный ручной деплой
 
 ```bash
@@ -121,4 +138,10 @@ python -m app.main backfill-denorm --period 2026-08
 python -m app.main backfill-channel-denorm --period 2026-08
 # --force: перезаписать channel/video stat, не только missing
 # publish (report JSONB) obsolete — frontend uses v2 channel_stat/video_stat
+
+# edit channels (category / status / priority). Default dry-run; --apply writes.
+# UI: Shift+click channel logo → JSONL row with @handle (UC… only if no handle).
+python -m app.main edit-channels --id @somehandle --status 0
+python -m app.main edit-channels --file scripts/channel_edits.example.jsonl
+python -m app.main edit-channels --file edits.jsonl --apply
 ```

@@ -14,6 +14,7 @@ Commands:
   refresh-thumbnails — HEAD/GET channel.thumbnail_url; YT detail refresh for broken (--cats optional)
   sync-logos — missing channel logos → download on VPS (channel priority<=N, cat sort_order<=5)
   add-channels — upsert channels by @handle into a category (YT forHandle, ~1 quota unit each)
+  edit-channels — set category_id/status/priority (single id or --file csv/json/jsonl; dry-run unless --apply)
   quota-status — print local YT quota estimate (PT day, logs/yt_quota/current.json)
   sync-priority — channel.priority = best pv_score_rank over last N months (default 12)
 
@@ -41,6 +42,10 @@ Examples:
   python -m app.main sync-logos --cats 1,7,8 --workers 24
   python -m app.main add-channels --cats 19 --handles @mrbeast,@tseries
   python -m app.main add-channels --cats 19 --handles @mrbeast --priority 50
+  python -m app.main edit-channels --id UCxxx --status 0
+  python -m app.main edit-channels --id @handle --category-id 19
+  python -m app.main edit-channels --file scripts/channel_edits.example.jsonl
+  python -m app.main edit-channels --file edits.csv --apply
   python -m app.main quota-status
   python -m app.main sync-priority
   python -m app.main sync-priority --cats 1 --months 12
@@ -396,6 +401,50 @@ async def cmd_add_channels(
     )
 
 
+async def cmd_edit_channels(
+    *,
+    file: str | None,
+    channel_ref: str | None,
+    category_id: int | None,
+    status: int | None,
+    priority: int | None,
+    apply: bool,
+) -> None:
+    from app.channel.edit_channels import (
+        ChannelEdit,
+        apply_edits,
+        edit_from_mapping,
+        parse_edits_file,
+    )
+
+    edits: list[ChannelEdit] = []
+    if file:
+        edits.extend(parse_edits_file(Path(file)))
+    if channel_ref:
+        if category_id is None and status is None and priority is None:
+            raise SystemExit(
+                "edit-channels --id needs at least one of "
+                "--category-id / --status / --priority"
+            )
+        edits.append(
+            edit_from_mapping(
+                {
+                    "channel_id": channel_ref,
+                    "category_id": category_id,
+                    "status": status,
+                    "priority": priority,
+                }
+            )
+        )
+    if not edits:
+        raise SystemExit(
+            "edit-channels requires --file and/or --id "
+            "(with --category-id / --status / --priority)"
+        )
+
+    await apply_edits(edits, apply=apply)
+
+
 async def cmd_quota_status() -> None:
     from app.api import yt_quota
 
@@ -431,6 +480,7 @@ COMMANDS = {
     "refresh-thumbnails": cmd_refresh_thumbnails,
     "sync-logos": cmd_sync_logos,
     "add-channels": cmd_add_channels,
+    "edit-channels": cmd_edit_channels,
     "quota-status": cmd_quota_status,
     "sync-priority": cmd_sync_priority,
 }
@@ -445,7 +495,7 @@ def build_parser() -> argparse.ArgumentParser:
         "commands",
         nargs="*",
         choices=list(COMMANDS),
-        help="one or more: channel-stat | videos | video-detail | video-stat | channel-report | shorts-sync | apply-is-short | backfill-denorm | backfill-channel-denorm | refresh-thumbnails | sync-logos | add-channels | quota-status | sync-priority",
+        help="one or more: channel-stat | videos | video-detail | video-stat | channel-report | shorts-sync | apply-is-short | backfill-denorm | backfill-channel-denorm | refresh-thumbnails | sync-logos | add-channels | edit-channels | quota-status | sync-priority",
     )
     p.add_argument(
         "--period",
@@ -477,8 +527,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--priority",
         type=int,
-        default=100,
-        help="channel.priority ceiling for videos fetch; add-channels: set priority (default 100)",
+        default=None,
+        help="channel.priority ceiling for videos/sync-logos (default 100); "
+        "add-channels: set priority (default 100); edit-channels: set priority",
     )
     p.add_argument(
         "--force",
@@ -510,6 +561,34 @@ def build_parser() -> argparse.ArgumentParser:
         "--handles",
         default=None,
         help="add-channels: comma-separated @handles or UC… ids (e.g. @mrbeast,@tseries)",
+    )
+    p.add_argument(
+        "--file",
+        default=None,
+        help="edit-channels: path to .csv / .json / .jsonl batch of edits",
+    )
+    p.add_argument(
+        "--id",
+        dest="edit_id",
+        default=None,
+        help="edit-channels: single UC… id or @handle (with --category-id/--status/--priority)",
+    )
+    p.add_argument(
+        "--category-id",
+        type=int,
+        default=None,
+        help="edit-channels: set channel.category_id",
+    )
+    p.add_argument(
+        "--status",
+        type=int,
+        default=None,
+        help="edit-channels: set channel.status (0=off, 1=on)",
+    )
+    p.add_argument(
+        "--apply",
+        action="store_true",
+        help="edit-channels: write changes (default is dry-run)",
     )
     return p
 
@@ -555,6 +634,17 @@ async def _run_parsed(args: argparse.Namespace) -> None:
         await cmd_quota_status()
         return
 
+    if args.commands == ["edit-channels"]:
+        await cmd_edit_channels(
+            file=args.file,
+            channel_ref=args.edit_id,
+            category_id=args.category_id,
+            status=args.status,
+            priority=args.priority,
+            apply=args.apply,
+        )
+        return
+
     n_yt = await yt_pending.flush_pending()
     if n_yt:
         logger.info(f"recovered {n_yt} pending YT rows before commands")
@@ -566,6 +656,7 @@ async def _run_parsed(args: argparse.Namespace) -> None:
 
     period = parse_period(args.period)
     category_ids = await resolve_category_ids(parse_cats(args.cats))
+    priority = 100 if args.priority is None else args.priority
 
     logger.info(f"period={period} cats={category_ids} commands={args.commands}")
 
@@ -575,7 +666,7 @@ async def _run_parsed(args: argparse.Namespace) -> None:
             await cmd_videos(
                 period,
                 category_ids,
-                priority=args.priority,
+                priority=priority,
                 skip_shorts=args.skip_shorts,
             )
         elif name == "video-detail":
@@ -592,7 +683,7 @@ async def _run_parsed(args: argparse.Namespace) -> None:
             await cmd_shorts_sync(
                 period,
                 category_ids,
-                priority=args.priority,
+                priority=priority,
                 channel_id=args.channel_id,
             )
         elif name == "apply-is-short":
@@ -625,7 +716,7 @@ async def _run_parsed(args: argparse.Namespace) -> None:
                 raise SystemExit("sync-logos requires --cats (e.g. --cats 1)")
             await cmd_sync_logos(
                 cats,
-                priority=args.priority,
+                priority=priority,
                 workers=args.workers,
                 dry_run=args.dry_run,
                 force=args.force,
@@ -637,7 +728,16 @@ async def _run_parsed(args: argparse.Namespace) -> None:
             await cmd_add_channels(
                 cats[0],
                 parse_handles(args.handles),
+                priority=priority,
+            )
+        elif name == "edit-channels":
+            await cmd_edit_channels(
+                file=args.file,
+                channel_ref=args.edit_id,
+                category_id=args.category_id,
+                status=args.status,
                 priority=args.priority,
+                apply=args.apply,
             )
         elif name == "quota-status":
             await cmd_quota_status()

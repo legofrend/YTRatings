@@ -22,6 +22,7 @@ const VIDEOS_MAX = 20;
 
 const showDetails = ref(false);
 const copied = ref(false);
+const copiedLabel = ref('ID скопирован');
 /** How many top videos to show (5 → 10 → 15 → 20). Fetch always pulls VIDEOS_MAX. */
 const videosLimit = ref(VIDEOS_STEP);
 const EMPTY_LOGO = '/img/empty.png';
@@ -66,17 +67,43 @@ watch(
   }
 );
 
-async function copyChannelId() {
+/** Prefer @handle; fall back to UC… id when custom_url missing. */
+function channelRef() {
+  const handle = (props.item.custom_url || '').trim();
+  return handle || props.item.channel_id;
+}
+
+/** JSONL row for `python -m app.main edit-channels --file …` (null = leave unchanged). */
+function editTemplateLine() {
+  const ref = channelRef();
+  const isHandle = ref !== props.item.channel_id;
+  return JSON.stringify({
+    ...(isHandle ? { id: ref } : { channel_id: ref }),
+    category_id: props.item.category_id ?? null,
+    status: null,
+    priority: null,
+  });
+}
+
+async function copyEditTemplate() {
+  const line = editTemplateLine();
   try {
-    await navigator.clipboard.writeText(props.item.channel_id);
+    await navigator.clipboard.writeText(line);
+    copiedLabel.value = 'шаблон edit скопирован';
     copied.value = true;
     setTimeout(() => {
       copied.value = false;
     }, 1500);
   } catch {
-    // fallback
-    window.prompt('Channel ID', props.item.channel_id);
+    window.prompt('edit-channels JSONL', line);
   }
+}
+
+function onLogoClick(e) {
+  // Admin-only: Shift+click → JSONL edit row (@handle preferred); plain click does nothing
+  if (!e.shiftKey) return;
+  e.preventDefault();
+  copyEditTemplate();
 }
 
 async function loadVideos() {
@@ -176,15 +203,15 @@ watch(
           class="h-full w-full max-w-none object-cover cursor-pointer hover:opacity-80"
           :src="logoSrc"
           :alt="item.channel_title"
-          :title="'Клик — скопировать ID\n' + item.channel_title + '\n' + item.custom_url + '\n' + item.channel_id"
+          :title="'Shift+клик — JSONL (@handle)\n' + item.channel_title + '\n' + (item.custom_url || item.channel_id)"
           @error="onLogoError"
-          @click="copyChannelId"
+          @click="onLogoClick"
         />
         <div
           v-if="copied"
           class="absolute -bottom-5 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] bg-black text-white px-1.5 py-0.5 rounded z-10"
         >
-          ID скопирован
+          {{ copiedLabel }}
         </div>
       </div>
 
