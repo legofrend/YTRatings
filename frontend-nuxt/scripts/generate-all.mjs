@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /** SSG: one HTML per category (latest period). */
-import { copyFileSync, existsSync } from 'node:fs'
+import { copyFileSync, existsSync, readFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -28,6 +28,14 @@ function copySeoIntoOutput() {
     console.log('[ssg] copied 404/index.html → 404.html (nginx)')
   } else if (!existsSync(flat404)) {
     console.warn('[ssg] warn: no 404.html produced — check prerender /404')
+  }
+  if (existsSync(flat404)) {
+    const html = readFileSync(flat404, 'utf8')
+    if (!html.includes('не найдена') && !html.includes('выберите категорию')) {
+      console.warn(
+        '[ssg] warn: 404.html looks empty/wrong — expected NotFoundShell content'
+      )
+    }
   }
 }
 

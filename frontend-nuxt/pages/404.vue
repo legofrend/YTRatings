@@ -2,11 +2,10 @@
 /**
  * Stationary 404 — prerendered to /404/index.html, copied to /404.html for nginx.
  * Soft-404 for unknown sys_name still lives in pages/[sysName].vue.
+ *
+ * Do NOT setResponseStatus(404) during prerender — Nitro then emits an empty
+ * error shell as 404.html instead of this page's HTML.
  */
-if (import.meta.server) {
-  setResponseStatus(404)
-}
-
 useSeoMeta({
   title: '404 — страница не найдена | YTRatings',
   description:
