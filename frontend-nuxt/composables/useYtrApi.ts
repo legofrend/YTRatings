@@ -56,5 +56,29 @@ export function useYtrApi() {
       }>('category', {
         query: { category_id: categoryId, limit, months },
       }),
+    search: (opts: {
+      query: string
+      category_id?: number | null
+      period?: string | null
+      limit_ch?: number
+    }) =>
+      api<{
+        category_id: number | null
+        period: string
+        query: string
+        type: string
+        limit_ch: number
+        limit_v: number
+        category_fallback?: boolean
+        channels: Record<string, any>[]
+      }>('search', {
+        query: {
+          query: opts.query,
+          type: 'channel',
+          ...(opts.category_id != null ? { category_id: opts.category_id } : {}),
+          ...(opts.period ? { period: opts.period } : {}),
+          limit_ch: opts.limit_ch ?? 50,
+        },
+      }),
   }
 }

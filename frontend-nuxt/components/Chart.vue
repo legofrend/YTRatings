@@ -7,11 +7,35 @@ const props = defineProps({
   selectedSort: { type: String, default: 'rank' },
   period: { type: String, default: null },
   limit: { type: Number, default: 20 },
+  /** Client-side filter by title / custom_url; empty = no filter. */
+  filterQuery: { type: String, default: '' },
+  pageCategoryId: { type: Number, default: null },
+  /** category_id → sys_name for ChannelItem links. */
+  categorySysById: { type: Object, default: () => ({}) },
   showHelp: { type: Boolean, default: false },
 });
 
+function normHandle(s) {
+  return String(s || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^@+/, '');
+}
+
+const filterActive = computed(() => normHandle(props.filterQuery).length > 0);
+
 const sortetChannels = computed(() => {
-  const channels = [...(props.data.data || [])];
+  let channels = [...(props.data.data || [])];
+
+  const q = normHandle(props.filterQuery);
+  if (q) {
+    channels = channels.filter((c) => {
+      const title = String(c.channel_title || '').toLowerCase();
+      const handle = normHandle(c.custom_url);
+      return title.includes(q) || handle.includes(q);
+    });
+  }
+
   if (props.selectedSort == 'rank' || props.selectedSort == null) {
     return channels;
   }
@@ -37,16 +61,25 @@ const sortetChannels = computed(() => {
     </header>
 
     <main>
+      <p
+        v-if="filterActive && sortetChannels.length === 0"
+        class="text-center text-sm text-gray-500 py-6"
+      >
+        Ничего не найдено в текущем топ-{{ Math.min(data.data?.length || 0, 100) }}.
+        Enter — поиск по всем каналам категории
+      </p>
       <ul v-auto-animate>
         <li
           v-for="(item, index) in sortetChannels"
-          v-show="limit >= 999 || index < limit"
+          v-show="filterActive || limit >= 999 || index < limit"
           :key="item.channel_id"
         >
           <ChannelItem
             :item="item"
             :scale="props.data.scale"
             :period="period"
+            :page-category-id="pageCategoryId"
+            :category-sys-by-id="categorySysById"
             :help-arrow="showHelp && index === 0"
             :help-title="showHelp && index === 0"
             :help-rank="showHelp && index === 1"

@@ -28,6 +28,7 @@ class Video(Base):
     published_at_period: Mapped[date | None]
     # mapped_column(Computed("cast(date_trunc('month', published_at::date) as Date)"))
     # Date, server_default=func.date_trunc("month", published_at).cast(Date)
+    # title_tsv (tsvector) — DB-only, see sql/video_title_tsv.sql + trigger
 
     video_url: Mapped[Optional[str]]
     thumbnail_url: Mapped[Optional[str]]

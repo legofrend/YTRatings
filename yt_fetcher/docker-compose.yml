@@ -2,6 +2,8 @@ services:
   db:
     image: postgres:16
     container_name: o2t4_db
+    # Docker default /dev/shm is 64MB — VACUUM/parallel maintenance OOMs there
+    shm_size: "256mb"
     env_file: # Файл с переменными окружения (Вместо environment)
       - .env
     ports:

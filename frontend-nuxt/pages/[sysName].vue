@@ -15,6 +15,7 @@ const {
   channels: fetchChannels,
   categoryDynamics,
   categoryVideos: fetchCategoryVideos,
+  search: searchApi,
 } = useYtrApi()
 
 const sysName = computed(() => String(route.params.sysName || ''))
@@ -39,33 +40,121 @@ const sortTypes = [
   { id: 'comment_share', name: 'Доля комментариев' },
   { id: 'duration', name: 'Длительность' },
 ]
+/** Client filter over loaded channels (title / @handle). No API. */
+const channelFilter = ref('')
+const inlineSearch = ref<{
+  query: string
+  period: string
+  fallback: boolean
+  channels: ReturnType<typeof mapChannel>[]
+  scale: number
+} | null>(null)
+const searchPending = ref(false)
+const searchError = ref<string | null>(null)
 
-/** SSG payload: category + latest period channels (SEO). */
+function normFilter(s: string) {
+  return String(s || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^@+/, '')
+}
+
+watch(sysName, () => {
+  channelFilter.value = ''
+  inlineSearch.value = null
+  searchError.value = null
+})
+
+async function runBackendSearch() {
+  const q = channelFilter.value.trim()
+  if (!q || searchPending.value) return
+
+  const catId = page.value?.category?.id
+  if (catId == null) return
+
+  searchPending.value = true
+  searchError.value = null
+  try {
+    const res = await searchApi({
+      query: q,
+      category_id: catId,
+      period: activePeriod.value,
+      limit_ch: 50,
+    })
+    const channels = (res.channels || [])
+      .filter((c) => c.channel_id !== '__search_videos__')
+      .map(mapChannel)
+    inlineSearch.value = {
+      query: q,
+      period: res.period,
+      fallback: !!res.category_fallback,
+      channels,
+      scale: channelsScale(channels),
+    }
+  } catch (err: any) {
+    inlineSearch.value = null
+    searchError.value = err?.data?.detail || err?.message || String(err)
+  } finally {
+    searchPending.value = false
+  }
+}
+
+function clearInlineSearch() {
+  inlineSearch.value = null
+  searchError.value = null
+}
+
+watch(channelFilter, () => {
+  if (inlineSearch.value) clearInlineSearch()
+})
+
+/** SSG payload: category + latest period channels (SEO). Soft-404 keeps toolbar. */
 const { data: page, error, pending } = await useAsyncData(
   () => `cat-${sysName.value}`,
   async () => {
     const cats = (await fetchCategories()) as Category[]
+    const categories = cats.filter((c) => c.id !== 0 && c.sys_name)
     const cat = cats.find((c) => c.sys_name === sysName.value)
+
     if (!cat) {
-      throw createError({ statusCode: 404, statusMessage: 'Категория не найдена' })
+      return {
+        categories,
+        category: null as Category | null,
+        periods: [] as string[],
+        latestPeriod: null as string | null,
+        period: null as string | null,
+        scale: 0,
+        channels: [] as ReturnType<typeof mapChannel>[],
+        missing: 'category' as const,
+      }
     }
 
     const { periods } = await fetchPeriods(cat.id)
     if (!periods.length) {
-      throw createError({ statusCode: 404, statusMessage: 'Нет периодов' })
+      return {
+        categories,
+        category: cat,
+        periods: [] as string[],
+        latestPeriod: null as string | null,
+        period: null as string | null,
+        scale: 0,
+        channels: [] as ReturnType<typeof mapChannel>[],
+        missing: 'periods' as const,
+      }
     }
     const latestPeriod = periods[0]
     const res = await fetchChannels(cat.id, latestPeriod, 100)
     const channels = (res.channels || []).map(mapChannel)
 
     return {
-      categories: cats.filter((c) => c.id !== 0 && c.sys_name),
+      categories,
       category: cat,
       periods,
       latestPeriod,
       period: res.period,
       scale: channelsScale(channels),
       channels,
+      missing: null as null,
     }
   },
   {
@@ -75,6 +164,22 @@ const { data: page, error, pending } = await useAsyncData(
     },
   }
 )
+
+// Must stay in setup (not inside useAsyncData fetcher — loses Nuxt context after await).
+if (import.meta.server && page.value?.missing) {
+  setResponseStatus(404)
+}
+
+const pageMissing = computed(() => page.value?.missing ?? null)
+const missingMessage = computed(() => {
+  if (pageMissing.value === 'category') {
+    return `Категория «${sysName.value}» не найдена. Выберите другую в списке.`
+  }
+  if (pageMissing.value === 'periods') {
+    return 'Для этой категории пока нет данных.'
+  }
+  return null
+})
 
 const isArchive = computed(() => {
   if (!page.value || !periodQuery.value) return false
@@ -114,7 +219,7 @@ async function loadArchive(categoryId: number, period: string) {
 }
 
 watch(
-  [isArchive, activePeriod, () => page.value?.category.id],
+  [isArchive, activePeriod, () => page.value?.category?.id],
   ([arch, period, catId]) => {
     if (!arch || !period || catId == null) {
       archive.value = null
@@ -127,21 +232,71 @@ watch(
   { immediate: true }
 )
 
-const viewChannels = computed(() =>
+const viewChannels = computed(() => {
+  if (inlineSearch.value) return inlineSearch.value.channels
+  return isArchive.value
+    ? archive.value?.channels || []
+    : page.value?.channels || []
+})
+const viewScale = computed(() => {
+  if (inlineSearch.value) return inlineSearch.value.scale
+  return isArchive.value
+    ? archive.value?.scale || 0
+    : page.value?.scale || 0
+})
+const viewPeriod = computed(() => {
+  if (inlineSearch.value) return inlineSearch.value.period
+  return (
+    (isArchive.value ? archive.value?.period : page.value?.period) ||
+    activePeriod.value
+  )
+})
+
+/** Rating list (not backend-search results) for local filter / empty check. */
+const ratingChannelsForFilter = computed(() =>
   isArchive.value
     ? archive.value?.channels || []
     : page.value?.channels || []
 )
-const viewScale = computed(() =>
-  isArchive.value
-    ? archive.value?.scale || 0
-    : page.value?.scale || 0
+
+/** Local filter only when not showing backend search results. */
+const chartFilterQuery = computed(() =>
+  inlineSearch.value ? '' : channelFilter.value
 )
-const viewPeriod = computed(
-  () =>
-    (isArchive.value ? archive.value?.period : page.value?.period) ||
-    activePeriod.value
-)
+
+const localFilterMatches = computed(() => {
+  const q = normFilter(channelFilter.value)
+  const list = ratingChannelsForFilter.value
+  if (!q) return list
+  return list.filter((c) => {
+    const title = String(c.channel_title || '').toLowerCase()
+    const handle = normFilter(c.custom_url || '')
+    return title.includes(q) || handle.includes(q)
+  })
+})
+
+/** category_id → sys_name for clickable category hints in search results. */
+const categorySysById = computed(() => {
+  const m: Record<number, string> = {}
+  for (const c of page.value?.categories || []) {
+    if (c.id != null && c.sys_name) m[c.id] = c.sys_name
+  }
+  return m
+})
+
+/** Enter / filter icon: escalate to API only when local filter found nothing. */
+async function onFilterAction() {
+  const q = channelFilter.value.trim()
+  if (!q || searchPending.value) return
+  if (!inlineSearch.value && localFilterMatches.value.length > 0) return
+  await runBackendSearch()
+}
+
+function onFilterKeydown(e: KeyboardEvent) {
+  if (e.key !== 'Enter') return
+  e.preventDefault()
+  onFilterAction()
+}
 
 const chartData = computed(() => ({
   category: page.value?.category || null,
@@ -447,18 +602,25 @@ watch(sysName, () => {
     </p>
 
     <p v-if="pagePending && !page">Loading...</p>
-    <p v-else-if="pageError && !page">{{ pageError }}</p>
+    <p v-else-if="pageError && !page" class="text-center text-red-400 py-4">{{ pageError }}</p>
     <div v-else-if="page">
       <div
         class="relative flex flex-col md:flex-row justify-center items-center shadow select-none gap-1 md:gap-5 py-1"
       >
         <div class="relative">
           <select
-            :value="sysName"
+            :value="page.category?.sys_name || ''"
             class="pl-1 text-black text-base cursor-pointer rounded"
             name="category"
             @change="changeCategory(($event.target as HTMLSelectElement).value)"
           >
+            <option
+              v-if="pageMissing === 'category'"
+              disabled
+              value=""
+            >
+              — не найдена: {{ sysName }} —
+            </option>
             <option
               v-for="category in page.categories"
               :key="category.id"
@@ -477,72 +639,95 @@ watch(sysName, () => {
           </div>
         </div>
 
-        <select
-          :value="limit"
-          name="topChannels"
-          class="text-black text-base cursor-pointer rounded"
-          @change="changeLimit(Number(($event.target as HTMLSelectElement).value))"
-        >
-          <option v-for="n in topNumbers" :key="n.value" :value="n.value">
-            {{ n.name }}
-          </option>
-        </select>
-
-        <div class="relative flex justify-center items-center select-none gap-1">
-          <img
-            src="/img/arrowLeftWhite.svg"
-            class="h-4 mx-1 cursor-pointer"
-            alt=""
-            @click="shiftPeriod(-1)"
-          />
+        <template v-if="!pageMissing">
           <select
-            :value="activePeriod || ''"
+            :value="limit"
+            name="topChannels"
             class="text-black text-base cursor-pointer rounded"
-            name="period"
-            @change="changePeriod(($event.target as HTMLSelectElement).value)"
+            @change="changeLimit(Number(($event.target as HTMLSelectElement).value))"
           >
-            <option v-for="p in page.periods" :key="p" :value="p">
-              {{ formattedDate(p) }}
+            <option v-for="n in topNumbers" :key="n.value" :value="n.value">
+              {{ n.name }}
             </option>
           </select>
-          <img
-            src="/img/arrowLeftWhite.svg"
-            class="h-4 mx-1 cursor-pointer rotate-180"
-            alt=""
-            @click="shiftPeriod(1)"
-          />
-          <div
-            v-if="showHelp"
-            class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-50 w-36 rounded bg-amber-100 text-black text-[10px] leading-snug px-2 py-1 shadow-lg border border-amber-300"
-            @click.stop
-          >
-            Выберите месяц
-          </div>
-        </div>
 
-        <div class="relative flex flex-row items-center gap-1">
-          <div class="bg-white rounded-lg h-5 w-7 items-center flex justify-center">
-            <img src="/img/sortBtn.svg" class="h-4" alt="" />
-          </div>
-          <select v-model="selectedSort" name="sort" class="text-black cursor-pointer rounded">
-            <option
-              v-for="sort in sortTypes"
-              :key="sort.id"
-              class="text-left"
-              :value="sort.id"
+          <div class="relative flex justify-center items-center select-none gap-1">
+            <img
+              src="/img/arrowLeftWhite.svg"
+              class="h-4 mx-1 cursor-pointer"
+              alt=""
+              @click="shiftPeriod(-1)"
+            />
+            <select
+              :value="activePeriod || ''"
+              class="text-black text-base cursor-pointer rounded"
+              name="period"
+              @change="changePeriod(($event.target as HTMLSelectElement).value)"
             >
-              {{ sort.name }}
-            </option>
-          </select>
-          <div
-            v-if="showHelp"
-            class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-50 w-56 rounded bg-amber-100 text-black text-[10px] leading-snug px-2 py-1 shadow-lg border border-amber-300"
-            @click.stop
-          >
-            Способ сортировки каналов: число просмотров, подписчиков, доля лайков,
-            доля комментариев, длительность
+              <option v-for="p in page.periods" :key="p" :value="p">
+                {{ formattedDate(p) }}
+              </option>
+            </select>
+            <img
+              src="/img/arrowLeftWhite.svg"
+              class="h-4 mx-1 cursor-pointer rotate-180"
+              alt=""
+              @click="shiftPeriod(1)"
+            />
+            <div
+              v-if="showHelp"
+              class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-50 w-36 rounded bg-amber-100 text-black text-[10px] leading-snug px-2 py-1 shadow-lg border border-amber-300"
+              @click.stop
+            >
+              Выберите месяц
+            </div>
           </div>
-        </div>
+
+          <div class="relative flex flex-row items-center gap-1">
+            <div class="bg-white rounded-lg h-5 w-7 items-center flex justify-center">
+              <img src="/img/sortBtn.svg" class="h-4" alt="" />
+            </div>
+            <select v-model="selectedSort" name="sort" class="text-black cursor-pointer rounded">
+              <option
+                v-for="sort in sortTypes"
+                :key="sort.id"
+                class="text-left"
+                :value="sort.id"
+              >
+                {{ sort.name }}
+              </option>
+            </select>
+            <div
+              v-if="showHelp"
+              class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-50 w-56 rounded bg-amber-100 text-black text-[10px] leading-snug px-2 py-1 shadow-lg border border-amber-300"
+              @click.stop
+            >
+              Способ сортировки каналов: число просмотров, подписчиков, доля лайков,
+              доля комментариев, длительность
+            </div>
+          </div>
+
+          <div class="relative flex flex-row items-center gap-1">
+            <button
+              type="button"
+              class="bg-white rounded-lg h-5 w-7 items-center flex justify-center shrink-0 hover:bg-gray-100 disabled:opacity-50"
+              title="Искать в API, если локально пусто (Enter)"
+              :disabled="searchPending || !channelFilter.trim()"
+              @click="onFilterAction"
+            >
+              <img src="/img/filter.svg" class="h-3.5" alt="" />
+            </button>
+            <input
+              v-model="channelFilter"
+              type="search"
+              name="channelFilter"
+              placeholder="фильтр…"
+              autocomplete="off"
+              class="text-black text-base rounded w-28 md:w-40 px-1 min-w-0"
+              @keydown="onFilterKeydown"
+            />
+          </div>
+        </template>
 
         <div class="relative">
           <button
@@ -569,6 +754,14 @@ watch(sysName, () => {
         </div>
       </div>
 
+      <p
+        v-if="missingMessage"
+        class="text-center text-base md:text-lg py-10 px-4 text-white/90"
+      >
+        {{ missingMessage }}
+      </p>
+
+      <template v-else>
       <h2 class="flex items-center justify-center gap-2 text-xl md:text-3xl my-3">
         <div class="relative">
           <div
@@ -677,19 +870,41 @@ watch(sysName, () => {
       <p v-if="archivePending" class="text-center text-sm opacity-70">Загрузка периода…</p>
       <p v-else-if="archiveError" class="text-center text-sm text-red-400">{{ archiveError }}</p>
 
+      <div
+        v-if="inlineSearch || searchPending || searchError"
+        class="flex flex-wrap items-center justify-center gap-2 text-sm py-2"
+      >
+        <span v-if="searchPending" class="opacity-70">Поиск…</span>
+        <span v-else-if="searchError" class="text-red-400">{{ searchError }}</span>
+        <template v-else-if="inlineSearch">
+          <span>
+            Поиск «{{ inlineSearch.query }}»:
+            {{ inlineSearch.channels.length }} каналов
+            <span v-if="inlineSearch.fallback" class="text-gray-400">
+              (в категории пусто → все категории)
+            </span>
+          </span>
+          <button
+            type="button"
+            class="underline opacity-80 hover:opacity-100"
+            @click="clearInlineSearch"
+          >
+            сбросить
+          </button>
+        </template>
+      </div>
+
       <Chart
         :data="chartData"
         :selected-sort="selectedSort"
         :period="viewPeriod"
-        :limit="limit"
-        :show-help="showHelp"
+        :limit="inlineSearch ? 999 : limit"
+        :filter-query="chartFilterQuery"
+        :page-category-id="page?.category?.id ?? null"
+        :category-sys-by-id="categorySysById"
+        :show-help="showHelp && !inlineSearch"
       />
+      </template>
     </div>
-
-    <InfoBlock header="Предложить свой канал или тему" class="text-lg mt-3">
-      <ClientOnly>
-        <FeedbackForm />
-      </ClientOnly>
-    </InfoBlock>
   </div>
 </template>

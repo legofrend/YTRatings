@@ -732,6 +732,120 @@ class VideoStatDAO(BaseDAO):
                 rows.append(item)
             return rows
 
+    @staticmethod
+    def _ilike_contains(q: str) -> str:
+        esc = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        return f"%{esc}%"
+
+    @classmethod
+    async def search_by_title(
+        cls,
+        *,
+        query: str,
+        report_period: date | Period,
+        limit: int = 20,
+        category_id: int | None = None,
+        channel_id: str | None = None,
+        period_from: date | Period | None = None,
+        period_to: date | Period | None = None,
+    ) -> list[dict]:
+        """FTS search videos by title (title_tsv); attach video_stat for report_period."""
+        if isinstance(report_period, Period):
+            report_period = date(report_period.year, report_period.month, 1)
+        if isinstance(period_from, Period):
+            period_from = date(period_from.year, period_from.month, 1)
+        if isinstance(period_to, Period):
+            period_to = date(period_to.year, period_to.month, 1)
+
+        q = (query or "").strip()
+        if not q:
+            return []
+
+        where = [
+            "COALESCE(v.status, 1) > 0",
+            "ch.status = 1",
+            # Must use bare title_tsv (not COALESCE/to_tsvector) so GIN can match
+            "v.title_tsv @@ plainto_tsquery('russian', :q)",
+        ]
+        params: dict = {
+            "q": q,
+            "report_period": report_period,
+            "limit": int(limit),
+        }
+        if category_id is not None:
+            where.append("ch.category_id = :category_id")
+            params["category_id"] = int(category_id)
+        if channel_id:
+            where.append("v.channel_id = :channel_id")
+            params["channel_id"] = channel_id
+        if period_from is not None:
+            # bare column → can use idx on published_at_period
+            where.append("v.published_at_period >= :period_from")
+            params["period_from"] = period_from
+        if period_to is not None:
+            # exclusive end: [from, to)
+            where.append("v.published_at_period < :period_to")
+            params["period_to"] = period_to
+
+        sql = f"""
+            SELECT
+                v.video_id,
+                v.channel_id,
+                ch.channel_title,
+                ch.custom_url,
+                v.title,
+                v.description,
+                v.video_url,
+                v.thumbnail_url,
+                v.duration,
+                v.published_at,
+                v.is_clickbait,
+                v.clickbait_comment,
+                COALESCE(vs.report_period, :report_period) AS report_period,
+                COALESCE(vs.is_short, v.is_short) AS is_short,
+                vs.is_new,
+                COALESCE(vs.period_view_count, 0) AS period_view_count,
+                COALESCE(vs.period_like_count, 0) AS period_like_count,
+                COALESCE(vs.period_comment_count, 0) AS period_comment_count,
+                COALESCE(vs.view_count, 0) AS view_count,
+                COALESCE(vs.like_count, 0) AS like_count,
+                COALESCE(vs.comment_count, 0) AS comment_count,
+                CASE
+                    WHEN COALESCE(vs.is_short, v.is_short) IS TRUE
+                    THEN COALESCE(vs.period_view_count, 0) / 10.0
+                    ELSE COALESCE(vs.period_view_count, 0)
+                END AS score,
+                ts_rank(v.title_tsv, plainto_tsquery('russian', :q)) AS fts_rank
+            FROM video AS v
+            JOIN channel AS ch ON ch.channel_id = v.channel_id
+            LEFT JOIN video_stat AS vs
+              ON vs.video_id = v.video_id
+             AND vs.report_period = :report_period
+            WHERE {" AND ".join(where)}
+            ORDER BY
+                fts_rank DESC,
+                score DESC NULLS LAST,
+                v.published_at DESC NULLS LAST
+            LIMIT :limit
+        """
+
+        async with async_session_maker() as session:
+            result = await session.execute(text(sql), params)
+            rows = []
+            for row in result.mappings().all():
+                item = dict(row)
+                item.pop("fts_rank", None)
+                if item.get("report_period") is not None:
+                    item["report_period"] = item["report_period"].isoformat()
+                if item.get("published_at") is not None:
+                    item["published_at"] = item["published_at"].isoformat()
+                if item.get("score") is not None:
+                    item["score"] = int(round(float(item["score"])))
+                else:
+                    item["score"] = 0
+                rows.append(item)
+            return rows
+
     @classmethod
     async def top_for_channels(
         cls,

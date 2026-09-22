@@ -2,7 +2,7 @@ import asyncio
 from datetime import UTC, date, datetime, timedelta
 import time
 
-from sqlalchemy import text, select, or_, and_
+from sqlalchemy import text, select, or_, and_, func, case
 
 # from sqlalchemy.exc import SQLAlchemyError
 
@@ -10,6 +10,7 @@ from app.dao.base import BaseDAO
 from app.database import async_session_maker
 from app.logger import logger, save_errors
 from app.channel.models import Channel, ChannelStat
+from app.channel.category.models import Category
 from app.channel.video.dao import VideoDAO
 from app.config import settings
 from app.period import Period
@@ -856,6 +857,136 @@ class ChannelStatDAO(BaseDAO):
     async def latest_period(cls, category_id: int) -> date | None:
         periods = await cls.periods_for_category(category_id)
         return periods[0] if periods else None
+
+    @classmethod
+    async def latest_period_any(cls) -> date | None:
+        """Newest report_period that has any ranked channel_stat."""
+        async with async_session_maker() as session:
+            result = await session.execute(
+                select(func.max(ChannelStat.report_period)).where(
+                    ChannelStat.pv_score_rank.is_not(None)
+                )
+            )
+            return result.scalar_one_or_none()
+
+    @staticmethod
+    def _ilike_contains(q: str) -> str:
+        esc = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        return f"%{esc}%"
+
+    @staticmethod
+    def _zero_channel_stats(item: dict, report_period: date) -> dict:
+        """Fill missing channel_stat fields with 0; keep report_period."""
+        zeros = {
+            "rank": 0,
+            "rank_change": 0,
+            "pv_score": 0,
+            "pv_score_change": 0,
+            "pv_view": 0,
+            "pv_view_new_long": 0,
+            "pv_view_new_short": 0,
+            "pv_view_old_long": 0,
+            "pv_view_old_short": 0,
+            "pv_like": 0,
+            "pv_comment": 0,
+            "pv_video_long": 0,
+            "pv_video_short": 0,
+            "pv_duration": 0,
+            "subscriber_count": 0,
+            "pc_subscriber": 0,
+            "pc_view": 0,
+            "channel_view_count": 0,
+            "video_count": 0,
+        }
+        for k, v in zeros.items():
+            if item.get(k) is None:
+                item[k] = v
+        item["report_period"] = report_period.isoformat()
+        return item
+
+    @classmethod
+    async def search_channels(
+        cls,
+        *,
+        query: str,
+        report_period: date | Period,
+        limit: int = 20,
+        category_id: int | None = None,
+    ) -> list[dict]:
+        """Search active channels by title / custom_url; attach stats for period (0 if missing)."""
+        if isinstance(report_period, Period):
+            report_period = date(report_period.year, report_period.month, 1)
+
+        q = (query or "").strip()
+        if not q:
+            return []
+
+        pat = cls._ilike_contains(q)
+        pat_handle = cls._ilike_contains(q.lstrip("@"))
+
+        async with async_session_maker() as session:
+            where = [
+                Channel.status == 1,
+                or_(
+                    Channel.channel_title.ilike(pat, escape="\\"),
+                    Channel.custom_url.ilike(pat, escape="\\"),
+                    Channel.custom_url.ilike(pat_handle, escape="\\"),
+                ),
+            ]
+            if category_id is not None:
+                where.append(Channel.category_id == category_id)
+
+            title_hit = Channel.channel_title.ilike(pat, escape="\\")
+            result = await session.execute(
+                select(
+                    Channel.channel_id,
+                    Channel.channel_title,
+                    Channel.description,
+                    Channel.custom_url,
+                    Channel.thumbnail_url,
+                    Channel.category_id,
+                    Category.name.label("category_name"),
+                    ChannelStat.report_period,
+                    ChannelStat.pv_score_rank.label("rank"),
+                    ChannelStat.pv_score_rank_change.label("rank_change"),
+                    ChannelStat.pv_score,
+                    ChannelStat.pv_score_change,
+                    ChannelStat.pv_view,
+                    ChannelStat.pv_view_new_long,
+                    ChannelStat.pv_view_new_short,
+                    ChannelStat.pv_view_old_long,
+                    ChannelStat.pv_view_old_short,
+                    ChannelStat.pv_like,
+                    ChannelStat.pv_comment,
+                    ChannelStat.pv_video_long,
+                    ChannelStat.pv_video_short,
+                    ChannelStat.pv_duration,
+                    ChannelStat.subscriber_count,
+                    ChannelStat.pc_subscriber,
+                    ChannelStat.pc_view,
+                    ChannelStat.channel_view_count,
+                    ChannelStat.video_count,
+                )
+                .outerjoin(Category, Category.id == Channel.category_id)
+                .outerjoin(
+                    ChannelStat,
+                    and_(
+                        ChannelStat.channel_id == Channel.channel_id,
+                        ChannelStat.report_period == report_period,
+                    ),
+                )
+                .where(*where)
+                .order_by(
+                    case((title_hit, 0), else_=1),
+                    ChannelStat.pv_score.desc().nullslast(),
+                    Channel.channel_title.asc(),
+                )
+                .limit(limit)
+            )
+            rows = []
+            for row in result.mappings().all():
+                rows.append(cls._zero_channel_stats(dict(row), report_period))
+            return rows
 
     @classmethod
     async def top_channels(

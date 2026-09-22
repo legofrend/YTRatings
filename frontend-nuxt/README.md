@@ -9,6 +9,7 @@ Hybrid SSG: **одна статическая страница на катего
 - `/{sys_name}` — SSG, latest в HTML (SEO)
 - `/{sys_name}?period=2026-07-01` — тот же shell, данные с API
 - `?limit=10|20|100` — сколько строк показать
+- неизвестный slug — soft-404 с выбором категории; на проде nginx → `/404.html`
 
 Примеры: `/ai`, `/finance`, `/news_politics?period=2026-01-01&limit=50`
 
@@ -25,12 +26,13 @@ npm run dev          # proxy /api → :5000
 ## SSG
 
 ```bash
-npm run generate     # ~N HTML = активные категории + sitemap.xml + robots.txt
+npm run generate     # ~N HTML = активные категории + /404 + sitemap.xml + robots.txt
 ```
 
 При каждом generate из API категорий пишутся:
 - `public/sitemap.xml` → все `/` и `/{sys_name}`
 - `public/robots.txt` → `Sitemap: https://ytr.o2t4.ru/sitemap.xml`
+- `.output/public/404.html` (копия `404/index.html`) для nginx
 
 Нужен `NUXT_API_BASE` с `sys_name` (локальный API или задеплоенный бэкенд).  
 Артефакт: `.output/public/` → nginx. Node на VPS не нужен.
@@ -39,3 +41,4 @@ npm run generate     # ~N HTML = активные категории + sitemap.x
 
 - `NUXT_PUBLIC_API_BASE=/api/ytr/v2` (same-origin)
 - после месячного ETL: снова `npm run generate` + залить статику
+- nginx: `error_page 404 /404.html;` (и желательно `try_files $uri $uri/ $uri.html /404.html;`)

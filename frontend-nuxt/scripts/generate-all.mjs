@@ -19,6 +19,16 @@ function copySeoIntoOutput() {
     copyFileSync(src, path.join(out, name))
     console.log(`[ssg] copied ${name} → .output/public/`)
   }
+
+  // nginx error_page 404 /404.html — flatten Nuxt's /404/index.html
+  const nested404 = path.join(out, '404', 'index.html')
+  const flat404 = path.join(out, '404.html')
+  if (existsSync(nested404)) {
+    copyFileSync(nested404, flat404)
+    console.log('[ssg] copied 404/index.html → 404.html (nginx)')
+  } else if (!existsSync(flat404)) {
+    console.warn('[ssg] warn: no 404.html produced — check prerender /404')
+  }
 }
 
 console.log(

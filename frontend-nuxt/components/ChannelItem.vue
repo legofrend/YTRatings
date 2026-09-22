@@ -10,6 +10,10 @@ const props = defineProps({
     item: { type: Object, required: true },
     scale: { type: [Number, String], default: 0 },
     period: { type: String, default: null },
+    /** Current page category — show item.category_name when it differs. */
+    pageCategoryId: { type: Number, default: null },
+    /** category_id → sys_name for NuxtLink when hint is shown. */
+    categorySysById: { type: Object, default: () => ({}) },
     /** Which help bubbles to show on this row. */
     helpRank: { type: Boolean, default: false },
     helpArrow: { type: Boolean, default: false },
@@ -20,21 +24,46 @@ const { videos: fetchVideos, channelDynamics } = useYtrApi();
 const VIDEOS_STEP = 5;
 const VIDEOS_MAX = 20;
 
-const showDetails = ref(false);
+const showDetails = ref(!!props.item?.force_expanded);
 const copied = ref(false);
 const copiedLabel = ref('ID скопирован');
 /** How many top videos to show (5 → 10 → 15 → 20). Fetch always pulls VIDEOS_MAX. */
-const videosLimit = ref(VIDEOS_STEP);
+const videosLimit = ref(
+  props.item?.force_expanded
+    ? Math.min(VIDEOS_MAX, (props.item.top_videos || []).length || VIDEOS_STEP)
+    : VIDEOS_STEP
+);
 const EMPTY_LOGO = '/img/empty.png';
 const logoImg = ref(null);
 const logoSrc = ref(localLogo(props.item) || props.item?.thumbnail_url || EMPTY_LOGO);
+
+const showCategoryHint = computed(() => {
+  const name = props.item?.category_name;
+  if (!name) return false;
+  if (props.pageCategoryId == null) return true;
+  return props.item.category_id !== props.pageCategoryId;
+});
+
+const categorySysName = computed(() => {
+  const id = props.item?.category_id;
+  if (id == null) return null;
+  return props.categorySysById?.[id] || null;
+});
+
+const isSyntheticVideos = computed(
+  () => props.item?.channel_id === '__search_videos__'
+);
 const visibleVideos = computed(() => {
   const list = props.item.top_videos || [];
   return list.slice(0, videosLimit.value);
 });
+const videosCap = computed(() => {
+  if (isSyntheticVideos.value) return (props.item.top_videos || []).length;
+  return VIDEOS_MAX;
+});
 const canExpandVideos = computed(() => {
   const n = props.item.top_videos?.length || 0;
-  return videosLimit.value < Math.min(VIDEOS_MAX, n);
+  return videosLimit.value < Math.min(videosCap.value, n);
 });
 
 function localLogo(ch) {
@@ -64,6 +93,13 @@ watch(
   () => props.item.channel_id,
   () => {
     logoSrc.value = localLogo(props.item) || props.item?.thumbnail_url || EMPTY_LOGO;
+    if (props.item?.force_expanded) {
+      showDetails.value = true;
+      videosLimit.value = Math.min(
+        VIDEOS_MAX,
+        (props.item.top_videos || []).length || VIDEOS_STEP
+      );
+    }
   }
 );
 
@@ -107,6 +143,7 @@ function onLogoClick(e) {
 }
 
 async function loadVideos() {
+  if (isSyntheticVideos.value) return;
   if (!props.period) return;
   // already pulled max (or confirmed fewer exist) for this open/period
   if (props.item.videos_loaded_max && !props.item.videos_loading) return;
@@ -136,10 +173,11 @@ async function loadVideos() {
 }
 
 function expandVideos() {
-  videosLimit.value = Math.min(videosLimit.value + VIDEOS_STEP, VIDEOS_MAX);
+  videosLimit.value = Math.min(videosLimit.value + VIDEOS_STEP, videosCap.value);
 }
 
 async function loadHistory() {
+  if (isSyntheticVideos.value) return;
   if (props.item.history != null || props.item.history_loading) return;
 
   props.item.history_loading = true;
@@ -158,6 +196,14 @@ async function loadHistory() {
 async function toggleDetails() {
   showDetails.value = !showDetails.value;
   if (!showDetails.value) return;
+
+  if (isSyntheticVideos.value) {
+    videosLimit.value = Math.min(
+      VIDEOS_MAX,
+      (props.item.top_videos || []).length || VIDEOS_STEP
+    );
+    return;
+  }
 
   videosLimit.value = VIDEOS_STEP;
   await loadVideos();
@@ -236,6 +282,7 @@ watch(
               </div>
             </div>
             <a
+              v-if="!isSyntheticVideos && item.custom_url"
               target="_blank"
               class="relative hover:underline text-base md:text-lg font-semibold ml-1"
               :href="'https://www.youtube.com/' + item.custom_url"
@@ -249,6 +296,25 @@ watch(
                 Нажмите, чтобы открыть YouTube канала в отдельном окне
               </span>
             </a>
+            <span
+              v-else
+              class="relative text-base md:text-lg font-semibold ml-1"
+            >
+              {{ item.channel_title }}
+            </span>
+          </div>
+          <div
+            v-if="showCategoryHint"
+            class="text-[11px] md:text-xs text-gray-400 ml-8 md:ml-9 -mt-0.5"
+          >
+            <NuxtLink
+              v-if="categorySysName"
+              :to="`/${categorySysName}`"
+              class="hover:underline hover:text-gray-600"
+            >
+              {{ item.category_name }}
+            </NuxtLink>
+            <span v-else>{{ item.category_name }}</span>
           </div>
         </div>
 

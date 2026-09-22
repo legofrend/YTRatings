@@ -19,7 +19,7 @@ async function fetchJson<T>(url: string): Promise<T> {
 
 /** Same route set as SSG pages → sitemap stays in sync with structure. */
 async function collectPrerenderRoutes(): Promise<string[]> {
-  const routes = new Set<string>(['/'])
+  const routes = new Set<string>(['/', '/404'])
 
   const categories = await fetchJson<
     Array<{ id: number; name: string; sys_name?: string | null }>

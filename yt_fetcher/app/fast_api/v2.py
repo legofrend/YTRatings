@@ -2,12 +2,44 @@
 
 from __future__ import annotations
 
+from datetime import date
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException, Query
 
 from app.channel import CategoryDAO, ChannelStatDAO, VideoStatDAO
 from app.period import Period
 
 router = APIRouter(prefix="/ytr/v2", tags=["ytr-v2"])
+
+SEARCH_VIDEOS_CHANNEL_ID = "__search_videos__"
+SEARCH_VIDEOS_TITLE = "Видео"
+
+
+def _parse_period_opt(value: str | None) -> Period | None:
+    if not value:
+        return None
+    return Period.parse(value)
+
+
+def _synthetic_videos_channel(
+    *,
+    videos: list[dict],
+    report_period: date,
+    category_id: int | None,
+) -> dict:
+    row = {
+        "channel_id": SEARCH_VIDEOS_CHANNEL_ID,
+        "channel_title": SEARCH_VIDEOS_TITLE,
+        "description": "Видео, найденные по названию",
+        "custom_url": None,
+        "thumbnail_url": None,
+        "category_id": category_id,
+        "category_name": None,
+        "top_videos": videos,
+        "force_expanded": True,
+    }
+    return ChannelStatDAO._zero_channel_stats(row, report_period)
 
 
 @router.get("/categories")
@@ -83,6 +115,138 @@ async def list_channels(
         "limit": limit,
         "videos_limit": videos_limit,
         "videos_for": videos_for if videos_limit > 0 else 0,
+        "channels": channels,
+    }
+
+
+@router.get("/search")
+async def search(
+    query: str = Query(..., min_length=1, description="Search string"),
+    type: Literal["channel", "video", "all"] = Query(
+        "channel",
+        description="Search channels, videos, or both (default: channel)",
+    ),
+    category_id: int | None = Query(None, description="Optional category filter"),
+    channel_id: str | None = Query(
+        None, description="Optional channel filter (video title search)"
+    ),
+    period: str | None = Query(
+        None,
+        description="Period for channel/video stats YYYY-MM-DD; default = latest",
+    ),
+    period_from: str | None = Query(
+        None,
+        description=(
+            "Video publish range start (month date). "
+            "Default = period (stats month)"
+        ),
+    ),
+    period_to: str | None = Query(
+        None,
+        description=(
+            "Video publish range end exclusive (next month date). "
+            "Default = period + 1 month"
+        ),
+    ),
+    limit_ch: int = Query(20, ge=1, le=100, description="Max channels in response"),
+    limit_v: int = Query(20, ge=1, le=100, description="Max videos in response"),
+):
+    """Search channels (title/handle) and/or videos (title). Same shape as /channels."""
+    q = query.strip()
+    if not q:
+        raise HTTPException(status_code=422, detail="query must not be empty")
+
+    if channel_id and type == "channel":
+        raise HTTPException(
+            status_code=422,
+            detail="channel_id only applies to type=video|all",
+        )
+    if (period_from or period_to) and type == "channel":
+        raise HTTPException(
+            status_code=422,
+            detail="period_from/period_to only apply to type=video|all",
+        )
+
+    p_from = _parse_period_opt(period_from)
+    p_to = _parse_period_opt(period_to)
+
+    if period:
+        report_period = Period.parse(period)
+    elif category_id is not None:
+        latest = await ChannelStatDAO.latest_period(category_id)
+        if not latest:
+            latest = await ChannelStatDAO.latest_period_any()
+        if not latest:
+            raise HTTPException(status_code=404, detail="No periods available")
+        report_period = Period.parse(str(latest))
+    else:
+        latest = await ChannelStatDAO.latest_period_any()
+        if not latest:
+            raise HTTPException(status_code=404, detail="No periods available")
+        report_period = Period.parse(str(latest))
+
+    # Video publish window: default = [period, period+1month) exclusive end
+    if type in ("video", "all"):
+        if p_from is None:
+            p_from = report_period
+        if p_to is None:
+            p_to = Period.parse(str(p_from)).next(1)
+        if p_from >= p_to:
+            raise HTTPException(
+                status_code=422,
+                detail="period_from must be < period_to (period_to is exclusive)",
+            )
+
+    report_date = date(report_period.year, report_period.month, 1)
+    channels: list[dict] = []
+    category_fallback = False
+
+    if type in ("channel", "all"):
+        channels = await ChannelStatDAO.search_channels(
+            query=q,
+            report_period=report_period,
+            limit=limit_ch,
+            category_id=category_id,
+        )
+        # If nothing in category — broaden to all categories (before video block).
+        if category_id is not None and not channels:
+            channels = await ChannelStatDAO.search_channels(
+                query=q,
+                report_period=report_period,
+                limit=limit_ch,
+                category_id=None,
+            )
+            category_fallback = bool(channels)
+
+    if type in ("video", "all"):
+        videos = await VideoStatDAO.search_by_title(
+            query=q,
+            report_period=report_period,
+            limit=limit_v,
+            category_id=category_id if type == "video" else None,
+            channel_id=channel_id,
+            period_from=p_from,
+            period_to=p_to,
+        )
+        if videos:
+            channels.append(
+                _synthetic_videos_channel(
+                    videos=videos,
+                    report_period=report_date,
+                    category_id=category_id,
+                )
+            )
+
+    return {
+        "category_id": category_id,
+        "period": report_period.strf(),
+        "period_from": p_from.strf() if p_from else None,
+        "period_to": p_to.strf() if p_to else None,
+        "query": q,
+        "type": type,
+        "limit_ch": limit_ch,
+        "limit_v": limit_v,
+        "category_fallback": category_fallback,
         "channels": channels,
     }
 
