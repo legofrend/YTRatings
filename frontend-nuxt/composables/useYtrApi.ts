@@ -80,5 +80,15 @@ export function useYtrApi() {
           limit_ch: opts.limit_ch ?? 50,
         },
       }),
+    wordstat: (categoryId: number, period: string) =>
+      api<{
+        category_id: number
+        period: string | null
+        leaving: { lexeme: string; word: string; freq: number; type: number | null }[]
+        core: { lexeme: string; word: string; freq: number; type: number | null }[]
+        ['new']: { lexeme: string; word: string; freq: number; type: number | null }[]
+      }>('wordstat', {
+        query: { category_id: categoryId, period },
+      }),
   }
 }

@@ -100,6 +100,69 @@ export function channelsScale(channels: ReturnType<typeof mapChannel>[]) {
   return top.stat.score + Math.max(0, -(top.stat.score_change || 0))
 }
 
+/** Sum channel stats for category header (shares from totals). */
+export function aggregateChannelStats(
+  channels: ReturnType<typeof mapChannel>[]
+) {
+  let score = 0
+  let score_change = 0
+  let subscriber_count = 0
+  let subscriber_count_change = 0
+  let videos = 0
+  let shorts = 0
+  let duration = 0
+  let view_count = 0
+  let view_count_new_video = 0
+  let view_count_new_short = 0
+  let view_count_old_video = 0
+  let view_count_old_short = 0
+  let like_count = 0
+  let comment_count = 0
+
+  for (const ch of channels) {
+    const s = ch.stat || ({} as any)
+    score += Number(s.score) || 0
+    score_change += Number(s.score_change) || 0
+    subscriber_count += Number(s.subscriber_count) || 0
+    subscriber_count_change += Number(s.subscriber_count_change) || 0
+    videos += Number(s.videos) || 0
+    shorts += Number(s.shorts) || 0
+    duration += Number(s.duration) || 0
+    view_count += Number(s.view_count) || 0
+    view_count_new_video += Number(s.view_count_new_video) || 0
+    view_count_new_short += Number(s.view_count_new_short) || 0
+    view_count_old_video += Number(s.view_count_old_video) || 0
+    view_count_old_short += Number(s.view_count_old_short) || 0
+    like_count += Number(s.like_count) || 0
+    comment_count += Number(s.comment_count) || 0
+  }
+
+  const like_share = view_count > 0 ? (like_count / view_count) * 100 : 0
+  const comment_share = view_count > 0 ? (comment_count / view_count) * 100 : 0
+
+  return {
+    videos,
+    video_clickbaits: null,
+    shorts,
+    duration,
+    score,
+    score_change,
+    view_count,
+    view_count_new_video,
+    view_count_new_short,
+    view_count_old_video,
+    view_count_old_short,
+    total_view_count_change: null,
+    view_count_check: null,
+    like_count,
+    comment_count,
+    subscriber_count,
+    subscriber_count_change,
+    like_share,
+    comment_share,
+  }
+}
+
 export type Category = {
   id: number
   name: string

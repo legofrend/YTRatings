@@ -4,6 +4,7 @@ import {
   formattedDate,
   mapChannel,
   mapVideo,
+  aggregateChannelStats,
   type Category,
 } from '~/utils/report'
 
@@ -16,6 +17,7 @@ const {
   categoryDynamics,
   categoryVideos: fetchCategoryVideos,
   search: searchApi,
+  wordstat: fetchWordstat,
 } = useYtrApi()
 
 const sysName = computed(() => String(route.params.sysName || ''))
@@ -305,6 +307,37 @@ const chartData = computed(() => ({
   data: viewChannels.value,
 }))
 
+/** Same set Chart shows (filter + sort + limit) → category header sums. */
+const categoryStatChannels = computed(() => {
+  let channels = [...viewChannels.value]
+  const q = normFilter(chartFilterQuery.value)
+  if (q) {
+    channels = channels.filter((c) => {
+      const title = String(c.channel_title || '').toLowerCase()
+      const handle = normFilter(c.custom_url || '')
+      return title.includes(q) || handle.includes(q)
+    })
+  }
+  if (selectedSort.value && selectedSort.value !== 'rank') {
+    const key = selectedSort.value
+    channels.sort((a, b) => {
+      const v1 = a.stat?.[key]
+      const v2 = b.stat?.[key]
+      if (typeof v1 === 'number' && typeof v2 === 'number') return v2 - v1
+      return 0
+    })
+  }
+  const lim =
+    inlineSearch.value || limit.value >= 999
+      ? channels.length
+      : Math.min(limit.value, channels.length)
+  return channels.slice(0, lim)
+})
+
+const categoryAggregateStat = computed(() =>
+  aggregateChannelStats(categoryStatChannels.value)
+)
+
 const pagePending = computed(
   () => (pending.value && !page.value) || (isArchive.value && archivePending.value)
 )
@@ -570,6 +603,44 @@ onUnmounted(() => {
   document.removeEventListener('click', onHelpDocClick)
 })
 
+type WordstatReport = {
+  leaving: { lexeme: string; word: string; freq: number; type: number | null }[]
+  core: { lexeme: string; word: string; freq: number; type: number | null }[]
+  ['new']: { lexeme: string; word: string; freq: number; type: number | null }[]
+}
+const wordstatReport = ref<WordstatReport | null>(null)
+const wordstatKey = ref('')
+
+const hasWordstat = computed(() => {
+  const r = wordstatReport.value
+  if (!r) return false
+  return r.leaving.length + r.core.length + r.new.length > 0
+})
+
+async function loadWordstat() {
+  const catId = page.value?.category?.id
+  const period = viewPeriod.value
+  if (catId == null || !period) {
+    wordstatReport.value = null
+    wordstatKey.value = ''
+    return
+  }
+  const key = `${catId}|${period}`
+  if (key === wordstatKey.value && wordstatReport.value) return
+  try {
+    const res = await fetchWordstat(catId, period)
+    wordstatReport.value = {
+      leaving: res.leaving || [],
+      core: res.core || [],
+      new: res.new || [],
+    }
+    wordstatKey.value = key
+  } catch {
+    wordstatReport.value = null
+    wordstatKey.value = ''
+  }
+}
+
 watch(sysName, () => {
   showCategoryHistory.value = false
   categoryHistory.value = null
@@ -581,7 +652,17 @@ watch(sysName, () => {
   categoryTopVideosError.value = null
   categoryTopVideosLimit.value = CATEGORY_VIDEOS_STEP
   showHelp.value = false
+  wordstatReport.value = null
+  wordstatKey.value = ''
 })
+
+watch(
+  [() => page.value?.category?.id, viewPeriod],
+  () => {
+    loadWordstat()
+  },
+  { immediate: true }
+)
 
 </script>
 
@@ -762,109 +843,99 @@ watch(sysName, () => {
       </p>
 
       <template v-else>
-      <h2 class="flex items-center justify-center gap-2 text-xl md:text-3xl my-3">
-        <div class="relative">
-          <div
-            :class="showCategoryHistory ? 'rotate-90' : 'rotate-0'"
-            class="bg-gray-50 p-1 select-none shrink-0"
-          >
-            <img
-              class="cursor-pointer"
-              src="/img/arrowPeekRight.svg"
-              alt="Динамика категории"
-              title="Сумма индекса топ-N каналов за 12 мес."
-              @click="toggleCategoryHistory"
-            />
-          </div>
-          <div
-            v-if="showHelp"
-            class="absolute left-full top-1/2 -translate-y-1/2 ml-2 z-50 w-56 rounded bg-amber-100 text-black text-[10px] leading-snug px-2 py-1 shadow-lg border border-amber-300"
-            @click.stop
-          >
-            Нажмите, чтобы посмотреть динамику просмотров по всем каналам
-          </div>
-        </div>
-        <span>{{ page.category?.title || page.category?.name }}</span>
-      </h2>
+      <!-- category bar: left edge further out than channel rows (tree) -->
+      <div class="-ml-3 md:-ml-5">
+        <CategoryItem
+          :title="page.category?.title || page.category?.name || ''"
+          :description="page.category?.description"
+          :stat="categoryAggregateStat"
+          :expanded="showCategoryHistory"
+          :show-help="showHelp"
+          @toggle="toggleCategoryHistory"
+        >
+          <Wordstat
+            v-if="hasWordstat && wordstatReport"
+            :report="wordstatReport"
+          />
 
-      <div
-        v-if="showCategoryHistory"
-        class="mb-4 p-2 shadow-lg bg-gray-50 rounded-lg text-black space-y-3"
-      >
-        <div class="text-xs">
-          <div class="font-medium text-sm mb-1">
-            Топ новых видео категории
-            <span v-if="viewPeriod" class="font-normal text-gray-500">
-              · {{ formattedDate(viewPeriod) }}
-            </span>
-          </div>
           <div
-            v-if="categoryTopVideosLoading && !categoryTopVideos?.length"
-            class="flex items-center gap-2 p-2 text-gray-500"
+            class="text-xs"
+            :class="hasWordstat ? 'border-t border-gray-200 pt-2' : ''"
           >
-            <span
-              class="inline-block h-4 w-4 rounded-full border-2 border-gray-300 border-t-blue-500 animate-spin"
-            />
-            Загрузка видео…
-          </div>
-          <div v-else-if="categoryTopVideosError" class="p-2 text-red-600">
-            {{ categoryTopVideosError }}
-          </div>
-          <div v-else-if="!categoryTopVideos?.length" class="p-2 text-gray-500">
-            Нет новых видео за период
-          </div>
-          <div v-else>
-            <VideoInfo
-              v-for="(video, index) in visibleCategoryTopVideos"
-              :key="video.video_id"
-              :video="video"
-              :index="index"
-            />
-            <button
-              v-if="canExpandCategoryTopVideos"
-              type="button"
-              class="mt-1 mb-0.5 mx-auto block px-2 py-0.5 text-xs text-gray-500 hover:text-black hover:underline"
-              title="Показать ещё 5 видео"
-              @click="expandCategoryTopVideos"
+            <div class="font-medium text-sm mb-1">
+              Топ новых видео категории
+              <span v-if="viewPeriod" class="font-normal text-gray-500">
+                · {{ formattedDate(viewPeriod) }}
+              </span>
+            </div>
+            <div
+              v-if="categoryTopVideosLoading && !categoryTopVideos?.length"
+              class="flex items-center gap-2 p-2 text-gray-500"
             >
-              еще 5
-            </button>
+              <span
+                class="inline-block h-4 w-4 rounded-full border-2 border-gray-300 border-t-blue-500 animate-spin"
+              />
+              Загрузка видео…
+            </div>
+            <div v-else-if="categoryTopVideosError" class="p-2 text-red-600">
+              {{ categoryTopVideosError }}
+            </div>
+            <div v-else-if="!categoryTopVideos?.length" class="p-2 text-gray-500">
+              Нет новых видео за период
+            </div>
+            <div v-else>
+              <VideoInfo
+                v-for="(video, index) in visibleCategoryTopVideos"
+                :key="video.video_id"
+                :video="video"
+                :index="index"
+              />
+              <button
+                v-if="canExpandCategoryTopVideos"
+                type="button"
+                class="mt-1 mb-0.5 mx-auto block px-2 py-0.5 text-xs text-gray-500 hover:text-black hover:underline"
+                title="Показать ещё 5 видео"
+                @click="expandCategoryTopVideos"
+              >
+                еще 5
+              </button>
+            </div>
           </div>
-        </div>
 
-        <div class="flex items-center gap-1 border-t border-gray-200 pt-2">
-          <button
-            type="button"
-            class="shrink-0 self-stretch flex items-center px-0.5 hover:bg-black/5 rounded"
-            :title="
-              categoryHistoryMonths === 12
-                ? 'Показать 24 месяца'
-                : 'Вернуть 12 месяцев'
-            "
-            :aria-label="
-              categoryHistoryMonths === 12
-                ? 'Показать 24 месяца'
-                : 'Вернуть 12 месяцев'
-            "
-            @click="toggleCategoryHistoryMonths"
-          >
-            <img
-              src="/img/arrowLeft.svg"
-              class="h-4"
-              :class="categoryHistoryMonths === 24 ? 'rotate-180' : ''"
-              alt=""
-            />
-          </button>
-          <div class="min-w-0 flex-1">
-            <ChannelHistory
-              score-only
-              :title="`Сумма индекса ${limit >= 999 ? 'всех' : `топ-${limit}`} (${categoryHistoryMonths} мес.)`"
-              :points="categoryHistory || []"
-              :loading="categoryHistoryLoading"
-              :error="categoryHistoryError"
-            />
+          <div class="flex items-center gap-1 border-t border-gray-200 pt-2">
+            <button
+              type="button"
+              class="shrink-0 self-stretch flex items-center px-0.5 hover:bg-black/5 rounded"
+              :title="
+                categoryHistoryMonths === 12
+                  ? 'Показать 24 месяца'
+                  : 'Вернуть 12 месяцев'
+              "
+              :aria-label="
+                categoryHistoryMonths === 12
+                  ? 'Показать 24 месяца'
+                  : 'Вернуть 12 месяцев'
+              "
+              @click="toggleCategoryHistoryMonths"
+            >
+              <img
+                src="/img/arrowLeft.svg"
+                class="h-4"
+                :class="categoryHistoryMonths === 24 ? 'rotate-180' : ''"
+                alt=""
+              />
+            </button>
+            <div class="min-w-0 flex-1">
+              <ChannelHistory
+                score-only
+                :title="`Сумма индекса ${limit >= 999 ? 'всех' : `топ-${limit}`} (${categoryHistoryMonths} мес.)`"
+                :points="categoryHistory || []"
+                :loading="categoryHistoryLoading"
+                :error="categoryHistoryError"
+              />
+            </div>
           </div>
-        </div>
+        </CategoryItem>
       </div>
 
       <p v-if="archivePending" class="text-center text-sm opacity-70">Загрузка периода…</p>
