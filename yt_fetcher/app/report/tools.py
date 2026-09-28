@@ -237,7 +237,7 @@ def gen_script(data: list[SChannel], tmpl_file: str, output_file: str):
 #     downloaded = 0
 #     os.makedirs(workdir, exist_ok=True)
 #     # if not channel_ids:
-#     channels = ChannelDAO.find_all(category_id=category_id, status=1)
+#     channels = ChannelDAO.find_all(category_id=category_id, status=ChannelStatus.ACTIVE)
 
 #     for channel in channels:
 #         file_url = channel["thumbnail_url"]

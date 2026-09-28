@@ -53,6 +53,7 @@ select json_agg(row_to_json(t)) from (
   select channel_id, channel_title, custom_url, thumbnail_url, priority
   from channel
   where status=1 and category_id={int(category_id)} and priority<={int(priority)}
+  -- status=1 = ChannelStatus.ACTIVE (app.channel.models)
   order by priority, channel_id
 ) t;
 """

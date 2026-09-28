@@ -19,6 +19,7 @@ from pathlib import Path
 
 import urllib.request
 
+from app.channel.models import ChannelStatus
 from app.logger import logger
 
 DEFAULT_SSH_HOST = "root@195.133.201.63"
@@ -215,7 +216,7 @@ def sync_category_logos(
             ssh_host,
             f"select json_agg(row_to_json(t)) from ("
             f"select channel_id, channel_title, custom_url, thumbnail_url, priority "
-            f"from channel where status=1 and category_id={int(cid)} "
+            f"from channel where status={int(ChannelStatus.ACTIVE)} and category_id={int(cid)} "
             f"and priority<={int(priority)} order by priority, channel_id"
             f") t;",
         ) or []
