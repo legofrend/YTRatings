@@ -431,15 +431,25 @@ class VideoDAO(BaseDAO):
 
 
     @classmethod
-    async def list_channels_for_is_short(
+    async def _list_video_ids_for_is_short(
         cls,
         *,
+        after_id: str,
+        limit: int,
         category_ids: list[int] | None = None,
         channel_ids: list[str] | None = None,
+        only_null: bool = True,
     ) -> list[str]:
-        """Channels with last_shorts_fetch_dt set (eligible for apply-is-short)."""
-        filters = [f"c.status = {ChannelStatus.ACTIVE}", "c.last_shorts_fetch_dt IS NOT NULL"]
-        params: dict = {}
+        """Keyset page of videos eligible for apply-is-short."""
+        filters = [
+            f"c.status = {ChannelStatus.ACTIVE}",
+            "c.last_shorts_fetch_dt IS NOT NULL",
+            "v.published_at < c.last_shorts_fetch_dt",
+            "v.video_id > :after_id",
+        ]
+        params: dict = {"after_id": after_id or "", "limit": limit}
+        if only_null:
+            filters.append("v.is_short IS NULL")
         if channel_ids:
             filters.append("c.channel_id IN :channel_ids")
             params["channel_ids"] = list(channel_ids)
@@ -448,10 +458,12 @@ class VideoDAO(BaseDAO):
             params["category_ids"] = list(category_ids)
         q = text(
             f"""
-            SELECT c.channel_id
-            FROM channel c
+            SELECT v.video_id
+            FROM video v
+            JOIN channel c ON c.channel_id = v.channel_id
             WHERE {" AND ".join(filters)}
-            ORDER BY c.channel_id
+            ORDER BY v.video_id
+            LIMIT :limit
             """
         )
         if channel_ids:
@@ -463,83 +475,53 @@ class VideoDAO(BaseDAO):
         return list(rows)
 
     @classmethod
-    async def _update_is_short_for_channels(
+    async def _update_is_short_for_videos(
         cls,
-        channel_ids: list[str],
+        video_ids: list[str],
         *,
         only_null: bool = True,
     ) -> dict:
-        """Run set_true then set_false for one channel batch; separate commits."""
-        if not channel_ids:
-            return {"set_true": 0, "set_false": 0}
+        """One UPDATE: is_short = (video in playlist_shorts). updated_at via trigger."""
+        if not video_ids:
+            return {"set_true": 0, "set_false": 0, "updated": 0}
 
-        params: dict = {"channel_ids": list(channel_ids)}
         null_sql = " AND v.is_short IS NULL" if only_null else ""
-
-        set_true = text(
+        # In UUSH → TRUE (any status). Not in UUSH → FALSE only for status=1.
+        # updated_at: trigger_set_updated_at_video
+        q = text(
             f"""
             UPDATE video v
-            SET is_short = TRUE,
-                updated_at = CURRENT_TIMESTAMP
-            FROM playlist_shorts ps
-            JOIN channel c ON c.channel_id = ps.channel_id
-            WHERE v.video_id = ps.video_id
-              AND c.channel_id IN :channel_ids
-              AND c.last_shorts_fetch_dt IS NOT NULL
-              AND ps.published_at < c.last_shorts_fetch_dt
-              AND (v.is_short IS DISTINCT FROM TRUE)
-              {null_sql}
-            """
-        ).bindparams(bindparam("channel_ids", expanding=True))
-
-        set_false = text(
-            f"""
-            UPDATE video v
-            SET is_short = FALSE,
-                updated_at = CURRENT_TIMESTAMP
+            SET is_short = EXISTS (
+                SELECT 1 FROM playlist_shorts ps WHERE ps.video_id = v.video_id
+            )
             FROM channel c
-            JOIN (
-                SELECT channel_id, MIN(published_at) AS win_from
-                FROM playlist_shorts
-                WHERE channel_id IN :channel_ids
-                GROUP BY channel_id
-            ) w ON w.channel_id = c.channel_id
-            WHERE v.channel_id = c.channel_id
+            WHERE v.video_id IN :video_ids
+              AND v.channel_id = c.channel_id
               AND c.last_shorts_fetch_dt IS NOT NULL
-              AND w.win_from IS NOT NULL
-              AND v.published_at >= w.win_from
               AND v.published_at < c.last_shorts_fetch_dt
-              AND v.status = 1
-              AND NOT EXISTS (
-                  SELECT 1 FROM playlist_shorts ps
-                  WHERE ps.video_id = v.video_id
+              AND (
+                EXISTS (
+                    SELECT 1 FROM playlist_shorts ps WHERE ps.video_id = v.video_id
+                )
+                OR v.status = 1
               )
-              AND (v.is_short IS DISTINCT FROM FALSE)
+              AND v.is_short IS DISTINCT FROM EXISTS (
+                  SELECT 1 FROM playlist_shorts ps WHERE ps.video_id = v.video_id
+              )
               {null_sql}
+            RETURNING v.is_short
             """
-        ).bindparams(bindparam("channel_ids", expanding=True))
+        ).bindparams(bindparam("video_ids", expanding=True))
 
         async with async_session_maker() as session:
-            r_true = await session.execute(set_true, params)
+            rows = (
+                await session.execute(q, {"video_ids": list(video_ids)})
+            ).scalars().all()
             await session.commit()
-            n_true = r_true.rowcount or 0
 
-        n_false = 0
-        try:
-            async with async_session_maker() as session:
-                r_false = await session.execute(set_false, params)
-                await session.commit()
-                n_false = r_false.rowcount or 0
-        except Exception:
-            # TRUE already committed; don't lose it if FALSE times out.
-            logger.error(
-                f"set_false failed for {len(channel_ids)} channels "
-                f"(first={channel_ids[0] if channel_ids else None}); skipping batch",
-                exc_info=True,
-            )
-            raise
-
-        return {"set_true": n_true, "set_false": n_false}
+        n_true = sum(1 for x in rows if x is True)
+        n_false = sum(1 for x in rows if x is False)
+        return {"set_true": n_true, "set_false": n_false, "updated": len(rows)}
 
     @classmethod
     async def update_is_short_new(
@@ -554,83 +536,87 @@ class VideoDAO(BaseDAO):
         Apply is_short from playlist_shorts (UUSH mirror). No YouTube API.
 
         Scope: optional category_ids / channel_ids; omit both → all synced channels.
-        Updates run in channel batches (APPLY_IS_SHORT_CHANNEL_BATCH) to avoid
-        long single-statement timeouts.
-        FALSE only inside window MIN(playlist_shorts.published_at) .. last_shorts_fetch_dt
-        (and only if channel has shorts rows + fetch marker).
+        One UPDATE per video batch: TRUE if in UUSH else FALSE
+        (published_at < last_shorts_fetch_dt; updated_at via DB trigger).
         """
         from app.config import settings
 
-        channels = await cls.list_channels_for_is_short(
-            category_ids=category_ids,
-            channel_ids=channel_ids,
-        )
-        if not channels:
-            logger.info(
-                f"update_is_short_new: no eligible channels "
-                f"cats={category_ids} channels={channel_ids}"
-            )
-            return {
-                "set_true": 0,
-                "set_false": 0,
-                "channels": 0,
-                "batches": 0,
-            }
-
         batch_size = max(
-            1, int(batch_size or settings.APPLY_IS_SHORT_CHANNEL_BATCH or 10)
+            1, int(batch_size or settings.APPLY_IS_SHORT_VIDEO_BATCH or 5000)
         )
         total_true = 0
         total_false = 0
+        total_updated = 0
         batches = 0
         skipped = 0
-        n_batches = (len(channels) + batch_size - 1) // batch_size
-        for i in range(0, len(channels), batch_size):
-            chunk = channels[i : i + batch_size]
+        after_id = ""
+
+        while True:
+            ids = await cls._list_video_ids_for_is_short(
+                after_id=after_id,
+                limit=batch_size,
+                category_ids=category_ids,
+                channel_ids=channel_ids,
+                only_null=only_null,
+            )
+            if not ids:
+                break
+
             batches += 1
             part = None
             for attempt in range(1, 4):
                 try:
-                    part = await cls._update_is_short_for_channels(
-                        chunk, only_null=only_null
+                    part = await cls._update_is_short_for_videos(
+                        ids, only_null=only_null
                     )
                     break
                 except Exception as e:
                     if attempt < 3 and _is_connection_error(e):
                         wait_s = 30 * attempt
                         logger.warning(
-                            f"update_is_short_new batch {batches}/{n_batches}: "
+                            f"update_is_short_new batch {batches}: "
                             f"connection lost ({type(e).__name__}), "
                             f"retry {attempt}/2 in {wait_s}s"
                         )
                         await asyncio.sleep(wait_s)
                         continue
                     logger.error(
-                        f"update_is_short_new batch {batches}/{n_batches} FAILED "
-                        f"(channels={len(chunk)} first={chunk[0]}); continuing",
+                        f"update_is_short_new batch {batches} FAILED "
+                        f"(videos={len(ids)} first={ids[0]}); continuing",
                         exc_info=True,
                     )
                     break
+
+            after_id = ids[-1]
             if part is None:
                 skipped += 1
                 continue
+
             total_true += part["set_true"]
             total_false += part["set_false"]
+            total_updated += part["updated"]
             logger.info(
-                f"update_is_short_new batch {batches}/{n_batches}: "
-                f"channels={len(chunk)} set_true={part['set_true']} "
-                f"set_false={part['set_false']}"
+                f"update_is_short_new batch {batches}: "
+                f"videos={len(ids)} updated={part['updated']} "
+                f"set_true={part['set_true']} set_false={part['set_false']} "
+                f"after={after_id}"
+            )
+
+        if batches == 0:
+            logger.info(
+                f"update_is_short_new: no eligible videos "
+                f"cats={category_ids} channels={channel_ids} only_null={only_null}"
             )
 
         logger.info(
             f"update_is_short_new: cats={category_ids} "
-            f"channels={len(channels)} batches={batches} skipped={skipped} "
-            f"only_null={only_null} set_true={total_true} set_false={total_false}"
+            f"batches={batches} skipped={skipped} only_null={only_null} "
+            f"updated={total_updated} set_true={total_true} set_false={total_false}"
         )
         return {
             "set_true": total_true,
             "set_false": total_false,
-            "channels": len(channels),
+            "updated": total_updated,
             "batches": batches,
             "skipped": skipped,
         }

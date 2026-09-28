@@ -33,9 +33,8 @@ class Settings(BaseSettings):
     YT_API_ROOT_URL: str = "https://www.googleapis.com/"
     # Null-duration backfill: DB keyset page size (API still chunks by 50).
     YT_DETAIL_BATCH_SIZE: int = 5000
-    # apply-is-short: channels per UPDATE batch (TRUE then FALSE for each chunk).
-    # Keep small — set_false does NOT EXISTS vs playlist_shorts (heavy without index).
-    APPLY_IS_SHORT_CHANNEL_BATCH: int = 10
+    # apply-is-short: video rows per UPDATE batch (one statement: TRUE/FALSE via LEFT JOIN).
+    APPLY_IS_SHORT_VIDEO_BATCH: int = 5000
     OAI_API_KEY: str
     GOOGLE_SHEETS_API_KEY: str = ""
 
