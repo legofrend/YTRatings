@@ -46,6 +46,18 @@ TableType = Literal[
 youtube = build(
     "youtube", "v3", developerKey=settings.YT_API_KEY, cache_discovery=False
 )
+# Swap host only — do not replace full _baseUrl or paths double (…/youtube/v3/youtube/v3/…).
+_root = (settings.YT_API_ROOT_URL or "").strip()
+if _root:
+    if not _root.endswith("/"):
+        _root += "/"
+    _default_root = "https://youtube.googleapis.com/"
+    if youtube._baseUrl.startswith(_default_root):
+        youtube._baseUrl = _root + youtube._baseUrl[len(_default_root) :]
+    elif "://www.googleapis.com/" not in youtube._baseUrl:
+        # unexpected discovery shape: force www host, keep path after first /
+        _path = youtube._baseUrl.split("/", 3)[-1]  # after https://host/
+        youtube._baseUrl = _root + _path
 
 
 def dt2ytfmt(dt: datetime):

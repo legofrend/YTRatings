@@ -1,3 +1,4 @@
+import asyncio
 from datetime import date, datetime, UTC
 from pathlib import Path
 import sys
@@ -13,6 +14,7 @@ from app.config import settings
 # ytapi / openaiapi imported lazily inside methods that need them (FastAPI image stays slim)
 
 from app.channel.video.models import Video, VideoStat
+from app.channel.models import ChannelStatus
 import csv
 import json
 import pickle
@@ -20,6 +22,26 @@ import pickle
 
 def _raw_is_bq() -> bool:
     return settings.RAW_DB == "bigquery"
+
+
+def _is_connection_error(exc: BaseException) -> bool:
+    """True if exc (or its cause chain) is a dropped/failed DB connection, not a timeout."""
+    seen = set()
+    e: BaseException | None = exc
+    while e is not None and id(e) not in seen:
+        seen.add(id(e))
+        if isinstance(e, (ConnectionError, TimeoutError)):
+            return isinstance(e, ConnectionError)
+        if type(e).__name__ in (
+            "ConnectionDoesNotExistError",
+            "ConnectionFailureError",
+            "InterfaceError",
+        ):
+            return True
+        if getattr(e, "connection_invalidated", False):
+            return True
+        e = e.__cause__ or e.__context__
+    return False
 
 
 def save_data_dump(data: dict, filename_prefix: str = "youtube_data_dump") -> str:
@@ -131,7 +153,7 @@ class VideoDAO(BaseDAO):
                         from video as v
                         left join channel as c on c.channel_id = v.channel_id
                         where v.published_at_period >= '{published_at_period.strf()}'
-                        and c.status=1 and v.status=1
+                        and c.status={ChannelStatus.ACTIVE} and v.status=1
                     """
             if category_id:
                 query += f" and c.category_id={category_id}"
@@ -165,7 +187,7 @@ class VideoDAO(BaseDAO):
                         left join channel as c on c.channel_id = v.channel_id
                         left join video_stat vs on v.video_id = vs.video_id and vs.report_period = '{report_period.strf()}'
                         where vs.id is null and v.published_at_period >= '{published_at_period.strf()}'
-                        and c.status=1 and v.status=1
+                        and c.status={ChannelStatus.ACTIVE} and v.status=1
                     """
             if category_id:
                 query += f" and c.category_id={category_id}"
@@ -180,39 +202,53 @@ class VideoDAO(BaseDAO):
         cls,
         *,
         category_ids: list[int] | int | None = None,
+        limit: int | None = None,
+        after_id: str | None = None,
     ) -> list[str]:
-        """video_id with duration IS NULL (status=1), optional category filter via channel."""
+        """video_id with duration IS NULL (status=1), optional category filter via channel.
+
+        Keyset pagination: after_id + limit for stable batched backfills.
+        """
         if isinstance(category_ids, int):
             category_ids = [category_ids]
 
         if _raw_is_bq():
             # BQ path: fall back to generic null-duration ids (no cat filter yet)
-            return await cls.get_ids(filters={"duration": None, "status": 1})
+            ids = await cls.get_ids(filters={"duration": None, "status": 1})
+            if after_id:
+                ids = [i for i in ids if i > after_id]
+            ids.sort()
+            if limit is not None:
+                ids = ids[: max(0, int(limit))]
+            return ids
 
+        params: dict = {}
+        where = ["v.status = 1", "v.duration IS NULL"]
+        join = ""
+        if category_ids:
+            join = "JOIN channel c ON c.channel_id = v.channel_id"
+            where.append("c.category_id = ANY(:cats)")
+            params["cats"] = category_ids
+        if after_id:
+            where.append("v.video_id > :after_id")
+            params["after_id"] = after_id
+        lim = ""
+        if limit is not None:
+            lim = "LIMIT :limit"
+            params["limit"] = int(limit)
+
+        q = text(
+            f"""
+            SELECT v.video_id
+            FROM video v
+            {join}
+            WHERE {" AND ".join(where)}
+            ORDER BY v.video_id
+            {lim}
+            """
+        )
         async with async_session_maker() as session:
-            if category_ids:
-                q = text(
-                    """
-                    SELECT v.video_id
-                    FROM video v
-                    JOIN channel c ON c.channel_id = v.channel_id
-                    WHERE v.status = 1
-                      AND v.duration IS NULL
-                      AND c.category_id = ANY(:cats)
-                    ORDER BY v.video_id
-                    """
-                )
-                result = await session.execute(q, {"cats": category_ids})
-            else:
-                q = text(
-                    """
-                    SELECT v.video_id
-                    FROM video v
-                    WHERE v.status = 1 AND v.duration IS NULL
-                    ORDER BY v.video_id
-                    """
-                )
-                result = await session.execute(q)
+            result = await session.execute(q, params)
             return list(result.scalars().all())
 
     @classmethod
@@ -246,95 +282,198 @@ class VideoDAO(BaseDAO):
         *,
         category_ids: list[int] | int | None = None,
         skip_shorts: bool = True,
+        batch_size: int | None = None,
     ):
         """
         Fill duration (and related detail) via videos.list.
         skip_shorts kept for API compat; HTTP is_short is disabled — use apply-is-short.
+
+        When video_ids omitted: keyset-scan null-duration rows in batches of
+        YT_DETAIL_BATCH_SIZE (commit after each batch). Cursor advances even if YT
+        omits deleted ids — no infinite loop; leftover NULLs need a later run.
         """
         import app.api.ytapi as yt
+        from app.api import yt_pending
+        from app.config import settings
+
+        _ = skip_shorts
+        if batch_size is None:
+            batch_size = settings.YT_DETAIL_BATCH_SIZE
 
         if isinstance(video_ids, str):
             video_ids = [video_ids]
 
-        if not video_ids:
-            video_ids = await cls.get_ids_wo_duration(category_ids=category_ids)
-            logger.info(
-                f"Found videos without duration: {len(video_ids)} "
-                f"cats={category_ids}"
-            )
-            if not video_ids:
-                return []
-        data = None
-        try:
-            data = yt.video_list(video_ids, obj_type="detail")
-            logger.info(f"Fetched videos: {len(data) if data else 0}")
-            if not data:
-                return None
-            # HTTP check_shorts removed — is_short via playlist_shorts / apply-is-short
-            _ = skip_shorts
-            from app.api import yt_pending
+        if isinstance(category_ids, int):
+            scope = f"cat{category_ids}"
+            cat_list: list[int] | None = [category_ids]
+        elif category_ids:
+            scope = "cat" + "_".join(str(c) for c in category_ids[:8])
+            cat_list = list(category_ids)
+        else:
+            scope = "default"
+            cat_list = None
 
-            if isinstance(category_ids, int):
-                scope = f"cat{category_ids}"
-            elif category_ids:
-                scope = "cat" + "_".join(str(c) for c in category_ids[:8])
-            else:
-                scope = "default"
-            ok = await yt_pending.commit_rows("video_detail", data, scope=scope)
+        async def _commit_batch(rows: list, *, batch_no: int) -> bool:
+            batch_scope = f"{scope}_b{batch_no}" if batch_no else scope
+            ok = await yt_pending.commit_rows("video_detail", rows, scope=batch_scope)
             if ok:
-                logger.info(f"Updated videos: {len(data)}")
-                return data
+                logger.info(f"Updated videos: {len(rows)} (batch={batch_no or 'all'})")
+                return True
             logger.error(
-                f"Partial/failed bulk update for {len(data)} videos; "
+                f"Partial/failed bulk update for {len(rows)} videos; "
                 f"pending kept in logs/yt_pending/"
             )
-            return None
-        except Exception:
-            logger.error("Can't update video detail", exc_info=True)
-            try:
-                if data:
-                    from app.api import yt_pending
+            return False
 
-                    scope = "default"
-                    yt_pending._save_pending(
-                        yt_pending.pending_path("video_detail", scope),
-                        {
-                            "op": "video_detail",
-                            "scope": scope,
-                            "meta": {},
-                            "rows": yt_pending._normalize_rows(data),
-                        },
-                    )
+        # Explicit id list: one shot (API still chunks by 50 inside video_list).
+        if video_ids:
+            data = None
+            try:
+                data = yt.video_list(video_ids, obj_type="detail")
+                logger.info(f"Fetched videos: {len(data) if data else 0}")
+                if not data:
+                    return [] if yt.IS_QUOTA_EXCEEDED else None
+                if not await _commit_batch(data, batch_no=0):
+                    return None
+                return data
             except Exception:
-                pass
-            return None
+                logger.error("Can't update video detail", exc_info=True)
+                try:
+                    if data:
+                        yt_pending._save_pending(
+                            yt_pending.pending_path("video_detail", scope),
+                            {
+                                "op": "video_detail",
+                                "scope": scope,
+                                "meta": {},
+                                "rows": yt_pending._normalize_rows(data),
+                            },
+                        )
+                except Exception:
+                    pass
+                return None
+
+        batch_size = max(50, int(batch_size or 5000))
+        after_id: str | None = None
+        batch_no = 0
+        total_updated = 0
+
+        while True:
+            ids = await cls.get_ids_wo_duration(
+                category_ids=cat_list,
+                limit=batch_size,
+                after_id=after_id,
+            )
+            if not ids:
+                if batch_no == 0:
+                    logger.info(
+                        f"Found videos without duration: 0 cats={cat_list}"
+                    )
+                break
+
+            batch_no += 1
+            after_id = ids[-1]
+            logger.info(
+                f"video-detail batch {batch_no}: {len(ids)} ids "
+                f"(through {after_id}) cats={cat_list}"
+            )
+
+            data = None
+            try:
+                data = yt.video_list(ids, obj_type="detail")
+            except Exception:
+                logger.error(
+                    f"Can't update video detail batch {batch_no}", exc_info=True
+                )
+                try:
+                    if data:
+                        yt_pending._save_pending(
+                            yt_pending.pending_path(
+                                "video_detail", f"{scope}_b{batch_no}"
+                            ),
+                            {
+                                "op": "video_detail",
+                                "scope": f"{scope}_b{batch_no}",
+                                "meta": {},
+                                "rows": yt_pending._normalize_rows(data),
+                            },
+                        )
+                except Exception:
+                    pass
+                return None if total_updated == 0 else []
+
+            logger.info(
+                f"Fetched videos: {len(data) if data else 0}/{len(ids)} "
+                f"(batch={batch_no})"
+            )
+
+            if data:
+                if not await _commit_batch(data, batch_no=batch_no):
+                    return None if total_updated == 0 else []
+                total_updated += len(data)
+
+            if yt.IS_QUOTA_EXCEEDED:
+                logger.warning(
+                    f"yt quota exceeded during video-detail "
+                    f"(batch={batch_no}, updated={total_updated}); stopping"
+                )
+                break
+
+            # YT omitted some ids (deleted) — cursor already advanced; continue.
+
+        logger.info(
+            f"video-detail done: updated={total_updated} batches={batch_no} "
+            f"cats={cat_list}"
+        )
+        # Empty list = success (possibly partial); None = hard failure.
+        # Do not keep all rows in RAM across hundreds of thousands of videos.
+        return []
+
 
     @classmethod
-    async def update_is_short_new(
+    async def list_channels_for_is_short(
         cls,
         *,
         category_ids: list[int] | None = None,
         channel_ids: list[str] | None = None,
-        only_null: bool = True,
-    ) -> dict:
-        """
-        Apply is_short from playlist_shorts (UUSH mirror). No YouTube API.
-
-        Scope: optional category_ids / channel_ids; omit both → all synced channels.
-        Default window per channel: MIN(playlist_shorts.published_at) .. last_shorts_fetch_dt.
-        FALSE only inside that window (and only if channel has shorts rows + fetch marker).
-        """
-        filters: list[str] = []
+    ) -> list[str]:
+        """Channels with last_shorts_fetch_dt set (eligible for apply-is-short)."""
+        filters = [f"c.status = {ChannelStatus.ACTIVE}", "c.last_shorts_fetch_dt IS NOT NULL"]
         params: dict = {}
-
         if channel_ids:
             filters.append("c.channel_id IN :channel_ids")
-            params["channel_ids"] = channel_ids
+            params["channel_ids"] = list(channel_ids)
         if category_ids:
             filters.append("c.category_id IN :category_ids")
-            params["category_ids"] = category_ids
+            params["category_ids"] = list(category_ids)
+        q = text(
+            f"""
+            SELECT c.channel_id
+            FROM channel c
+            WHERE {" AND ".join(filters)}
+            ORDER BY c.channel_id
+            """
+        )
+        if channel_ids:
+            q = q.bindparams(bindparam("channel_ids", expanding=True))
+        if category_ids:
+            q = q.bindparams(bindparam("category_ids", expanding=True))
+        async with async_session_maker() as session:
+            rows = (await session.execute(q, params)).scalars().all()
+        return list(rows)
 
-        filter_sql = (" AND " + " AND ".join(filters)) if filters else ""
+    @classmethod
+    async def _update_is_short_for_channels(
+        cls,
+        channel_ids: list[str],
+        *,
+        only_null: bool = True,
+    ) -> dict:
+        """Run set_true then set_false for one channel batch; separate commits."""
+        if not channel_ids:
+            return {"set_true": 0, "set_false": 0}
+
+        params: dict = {"channel_ids": list(channel_ids)}
         null_sql = " AND v.is_short IS NULL" if only_null else ""
 
         set_true = text(
@@ -345,13 +484,14 @@ class VideoDAO(BaseDAO):
             FROM playlist_shorts ps
             JOIN channel c ON c.channel_id = ps.channel_id
             WHERE v.video_id = ps.video_id
+              AND c.channel_id IN :channel_ids
               AND c.last_shorts_fetch_dt IS NOT NULL
               AND ps.published_at < c.last_shorts_fetch_dt
               AND (v.is_short IS DISTINCT FROM TRUE)
               {null_sql}
-              {filter_sql}
             """
-        )
+        ).bindparams(bindparam("channel_ids", expanding=True))
+
         set_false = text(
             f"""
             UPDATE video v
@@ -361,6 +501,7 @@ class VideoDAO(BaseDAO):
             JOIN (
                 SELECT channel_id, MIN(published_at) AS win_from
                 FROM playlist_shorts
+                WHERE channel_id IN :channel_ids
                 GROUP BY channel_id
             ) w ON w.channel_id = c.channel_id
             WHERE v.channel_id = c.channel_id
@@ -375,29 +516,124 @@ class VideoDAO(BaseDAO):
               )
               AND (v.is_short IS DISTINCT FROM FALSE)
               {null_sql}
-              {filter_sql}
             """
-        )
-
-        if channel_ids:
-            set_true = set_true.bindparams(bindparam("channel_ids", expanding=True))
-            set_false = set_false.bindparams(bindparam("channel_ids", expanding=True))
-        if category_ids:
-            set_true = set_true.bindparams(bindparam("category_ids", expanding=True))
-            set_false = set_false.bindparams(bindparam("category_ids", expanding=True))
+        ).bindparams(bindparam("channel_ids", expanding=True))
 
         async with async_session_maker() as session:
             r_true = await session.execute(set_true, params)
-            r_false = await session.execute(set_false, params)
             await session.commit()
-            n_true = r_true.rowcount
-            n_false = r_false.rowcount
+            n_true = r_true.rowcount or 0
+
+        n_false = 0
+        try:
+            async with async_session_maker() as session:
+                r_false = await session.execute(set_false, params)
+                await session.commit()
+                n_false = r_false.rowcount or 0
+        except Exception:
+            # TRUE already committed; don't lose it if FALSE times out.
+            logger.error(
+                f"set_false failed for {len(channel_ids)} channels "
+                f"(first={channel_ids[0] if channel_ids else None}); skipping batch",
+                exc_info=True,
+            )
+            raise
+
+        return {"set_true": n_true, "set_false": n_false}
+
+    @classmethod
+    async def update_is_short_new(
+        cls,
+        *,
+        category_ids: list[int] | None = None,
+        channel_ids: list[str] | None = None,
+        only_null: bool = True,
+        batch_size: int | None = None,
+    ) -> dict:
+        """
+        Apply is_short from playlist_shorts (UUSH mirror). No YouTube API.
+
+        Scope: optional category_ids / channel_ids; omit both → all synced channels.
+        Updates run in channel batches (APPLY_IS_SHORT_CHANNEL_BATCH) to avoid
+        long single-statement timeouts.
+        FALSE only inside window MIN(playlist_shorts.published_at) .. last_shorts_fetch_dt
+        (and only if channel has shorts rows + fetch marker).
+        """
+        from app.config import settings
+
+        channels = await cls.list_channels_for_is_short(
+            category_ids=category_ids,
+            channel_ids=channel_ids,
+        )
+        if not channels:
+            logger.info(
+                f"update_is_short_new: no eligible channels "
+                f"cats={category_ids} channels={channel_ids}"
+            )
+            return {
+                "set_true": 0,
+                "set_false": 0,
+                "channels": 0,
+                "batches": 0,
+            }
+
+        batch_size = max(
+            1, int(batch_size or settings.APPLY_IS_SHORT_CHANNEL_BATCH or 10)
+        )
+        total_true = 0
+        total_false = 0
+        batches = 0
+        skipped = 0
+        n_batches = (len(channels) + batch_size - 1) // batch_size
+        for i in range(0, len(channels), batch_size):
+            chunk = channels[i : i + batch_size]
+            batches += 1
+            part = None
+            for attempt in range(1, 4):
+                try:
+                    part = await cls._update_is_short_for_channels(
+                        chunk, only_null=only_null
+                    )
+                    break
+                except Exception as e:
+                    if attempt < 3 and _is_connection_error(e):
+                        wait_s = 30 * attempt
+                        logger.warning(
+                            f"update_is_short_new batch {batches}/{n_batches}: "
+                            f"connection lost ({type(e).__name__}), "
+                            f"retry {attempt}/2 in {wait_s}s"
+                        )
+                        await asyncio.sleep(wait_s)
+                        continue
+                    logger.error(
+                        f"update_is_short_new batch {batches}/{n_batches} FAILED "
+                        f"(channels={len(chunk)} first={chunk[0]}); continuing",
+                        exc_info=True,
+                    )
+                    break
+            if part is None:
+                skipped += 1
+                continue
+            total_true += part["set_true"]
+            total_false += part["set_false"]
+            logger.info(
+                f"update_is_short_new batch {batches}/{n_batches}: "
+                f"channels={len(chunk)} set_true={part['set_true']} "
+                f"set_false={part['set_false']}"
+            )
 
         logger.info(
-            f"update_is_short_new: cats={category_ids} channels={channel_ids} "
-            f"only_null={only_null} set_true={n_true} set_false={n_false}"
+            f"update_is_short_new: cats={category_ids} "
+            f"channels={len(channels)} batches={batches} skipped={skipped} "
+            f"only_null={only_null} set_true={total_true} set_false={total_false}"
         )
-        return {"set_true": n_true, "set_false": n_false}
+        return {
+            "set_true": total_true,
+            "set_false": total_false,
+            "channels": len(channels),
+            "batches": batches,
+            "skipped": skipped,
+        }
 
     @classmethod
     async def update_is_short_http_old(
@@ -672,7 +908,7 @@ class VideoStatDAO(BaseDAO):
         async with async_session_maker() as session:
             result = await session.execute(
                 text(
-                    """
+                    f"""
                     SELECT
                         v.video_id,
                         v.channel_id,
@@ -704,7 +940,7 @@ class VideoStatDAO(BaseDAO):
                     JOIN video AS v ON v.video_id = vs.video_id
                     JOIN channel AS ch ON ch.channel_id = vs.channel_id
                     WHERE ch.category_id = :category_id
-                      AND ch.status = 1
+                      AND ch.status = {ChannelStatus.ACTIVE}
                       AND vs.report_period = :report_period
                       AND vs.is_new IS TRUE
                       AND COALESCE(v.status, 1) > 0
@@ -763,7 +999,7 @@ class VideoStatDAO(BaseDAO):
 
         where = [
             "COALESCE(v.status, 1) > 0",
-            "ch.status = 1",
+            f"ch.status = {ChannelStatus.ACTIVE}",
             # Must use bare title_tsv (not COALESCE/to_tsvector) so GIN can match
             "v.title_tsv @@ plainto_tsquery('russian', :q)",
         ]
@@ -949,7 +1185,7 @@ class VideoStatDAO(BaseDAO):
         survives connection drops; UPDATE commits every batch_size rows.
 
         report_period: optional YYYY-MM-01 (or Period); None = all periods.
-        Only rows with video.channel_id NOT NULL and channel.status > 0.
+        Only rows with video.channel_id NOT NULL and channel.status != DELETED.
         """
         period_sql = ""
         params: dict = {}
@@ -995,7 +1231,7 @@ class VideoStatDAO(BaseDAO):
                AND prev.video_id = cur.video_id
             JOIN channel AS c ON c.channel_id = v.channel_id
             WHERE v.channel_id IS NOT NULL
-              AND c.status > 0
+              AND c.status > {ChannelStatus.DELETED}
               AND (
                   cur.channel_id IS NULL
                   OR cur.is_short IS NULL
