@@ -515,13 +515,25 @@ class ChannelDAO(BaseDAO):
         category_id: int = None,
         date_to: date = date.today(),
         priority: int = 100,
+        *,
+        only_missing: bool = False,
     ):
-        query = select(Channel.channel_id, Channel.last_shorts_fetch_dt).where(
-            Channel.status == ChannelStatus.ACTIVE,
-            or_(
+        """Channels needing UUSH sync.
+
+        Default: last_shorts_fetch_dt IS NULL or < date_to (incremental).
+        only_missing=True: never synced only (backfill).
+        """
+        fetch_filter = (
+            Channel.last_shorts_fetch_dt.is_(None)
+            if only_missing
+            else or_(
                 Channel.last_shorts_fetch_dt.is_(None),
                 Channel.last_shorts_fetch_dt < date_to,
-            ),
+            )
+        )
+        query = select(Channel.channel_id, Channel.last_shorts_fetch_dt).where(
+            Channel.status == ChannelStatus.ACTIVE,
+            fetch_filter,
             Channel.priority <= priority,
         )
         if category_id:

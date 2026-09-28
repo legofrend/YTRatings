@@ -32,7 +32,7 @@ Examples:
   python -m app.main videos --cats 1 --skip-shorts
   python -m app.main video-detail --cats 19
   python -m app.main shorts-sync --period 2026-08 --cats 1 --channel-id UCxxxxxxxx
-  python -m app.main apply-is-short --channel-id UCxxxxxxxx
+  python -m app.main shorts-sync --cats 1 --priority 9999 --only-missing
   python -m app.main apply-is-short --cats 1
   python -m app.main shorts-orphans
   python -m app.main shorts-orphans --cats 1
@@ -250,13 +250,14 @@ async def cmd_shorts_sync(
     *,
     priority: int,
     channel_id: str | None = None,
+    only_missing: bool = False,
 ) -> None:
     date_from = datetime.combine(period, datetime.min.time())
     date_to = datetime.combine(period.next(1), datetime.min.time())
     channel_ids = [channel_id] if channel_id else None
     logger.info(
         f"shorts-sync period={period} window=[{date_from} .. {date_to}) "
-        f"cats={category_ids} channel_id={channel_id}"
+        f"cats={category_ids} channel_id={channel_id} only_missing={only_missing}"
     )
     await PlaylistShortsDAO.sync_channels(
         category_ids=category_ids,
@@ -264,6 +265,7 @@ async def cmd_shorts_sync(
         date_to=date_to,
         channel_ids=channel_ids,
         priority=priority,
+        only_missing=only_missing,
     )
 
 
@@ -614,6 +616,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="shorts-sync / apply-is-short / shorts-orphans: single channel_id (UC…)",
     )
     p.add_argument(
+        "--only-missing",
+        action="store_true",
+        help="shorts-sync: only channels with last_shorts_fetch_dt IS NULL (backfill)",
+    )
+    p.add_argument(
         "--workers",
         type=int,
         default=20,
@@ -791,6 +798,7 @@ async def _run_parsed(args: argparse.Namespace) -> None:
                 category_ids,
                 priority=priority,
                 channel_id=args.channel_id,
+                only_missing=args.only_missing,
             )
         elif name == "apply-is-short":
             # None when --cats omitted → all synced channels; else only listed cats

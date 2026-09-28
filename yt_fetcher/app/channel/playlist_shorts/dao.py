@@ -131,6 +131,7 @@ class PlaylistShortsDAO(BaseDAO):
         channel_ids: list[str] | None = None,
         priority: int = 100,
         max_result: int = 5000,
+        only_missing: bool = False,
     ) -> None:
         from app.channel.dao import ChannelDAO
 
@@ -143,6 +144,7 @@ class PlaylistShortsDAO(BaseDAO):
                     category_id=category_id,
                     date_to=date_to.date(),
                     priority=priority,
+                    only_missing=only_missing,
                 )
                 channels.extend(part)
 
@@ -154,6 +156,7 @@ class PlaylistShortsDAO(BaseDAO):
         total = len(channels)
         logger.info(
             f"shorts-sync: {total} channels, window [{date_from} .. {date_to})"
+            f"{' only_missing' if only_missing else ''}"
         )
 
         for index, channel in enumerate(channels, start=1):
