@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import date
 
 from app.bq import write as bq_write
+from app.channel.models import ChannelStatus
 from app.logger import logger
 from app.period import Period
 
@@ -66,7 +67,7 @@ class ChannelBqDAO:
         sql = f"""
             SELECT c.channel_id, c.last_video_fetch_dt
             FROM `{channel}` AS c
-            WHERE c.status = 1
+            WHERE c.status = {ChannelStatus.ACTIVE}
               AND (c.last_video_fetch_dt IS NULL
                    OR DATE(c.last_video_fetch_dt) < @date_to)
               AND c.priority <= @priority
@@ -94,7 +95,7 @@ class ChannelBqDAO:
             LEFT JOIN `{video}` AS v
               ON v.channel_id = c.channel_id
              AND v.published_at_period = @report_period
-            WHERE c.status = 1 AND v.id IS NULL
+            WHERE c.status = {ChannelStatus.ACTIVE} AND v.id IS NULL
         """
         params: dict = {"report_period": report_period}
         if category_id is not None:
@@ -129,7 +130,7 @@ class ChannelStatBqDAO:
             LEFT JOIN `{channel_stat}` AS cs
               ON c.channel_id = cs.channel_id
              AND cs.report_period = @report_period
-            WHERE cs.id IS NULL AND c.status = 1
+            WHERE cs.id IS NULL AND c.status = {ChannelStatus.ACTIVE}
         """
         params: dict = {"report_period": report_period}
         if category_id is not None:

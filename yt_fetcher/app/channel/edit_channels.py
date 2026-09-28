@@ -1,6 +1,10 @@
 """
 Batch / single edits for channel.category_id / status / priority.
 
+status values: see ChannelStatus in app.channel.models
+  0 DELETED, 1 ACTIVE, 2 NO_RECENT_VIDEOS, 3 LOW_VIEWS,
+  4 LOW_SUBS, 5 WRONG_LANGUAGE, 6 WRONG_CATEGORY, 7 MANUAL_OFF
+
 File formats
 ------------
 JSONL (preferred — one pasteable line from UI):

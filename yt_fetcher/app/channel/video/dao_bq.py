@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 from app.bq import write as bq_write
+from app.channel.models import ChannelStatus
 from app.logger import logger
 from app.period import Period
 
@@ -124,7 +125,7 @@ class VideoStatBqDAO:
             FROM `{video}` AS v
             LEFT JOIN `{channel}` AS c ON c.channel_id = v.channel_id
             WHERE v.published_at_period >= @published_at_period
-              AND c.status = 1 AND v.status = 1
+              AND c.status = {ChannelStatus.ACTIVE} AND v.status = 1
         """
         params: dict = {"published_at_period": published_at_period}
         if category_id is not None:
@@ -156,7 +157,7 @@ class VideoStatBqDAO:
               ON v.video_id = vs.video_id AND vs.report_period = @report_period
             WHERE vs.id IS NULL
               AND v.published_at_period >= @published_at_period
-              AND c.status = 1 AND v.status = 1
+              AND c.status = {ChannelStatus.ACTIVE} AND v.status = 1
         """
         params: dict = {
             "report_period": report_period,

@@ -9,7 +9,7 @@ from sqlalchemy import text, select, or_, and_, func, case
 from app.dao.base import BaseDAO
 from app.database import async_session_maker
 from app.logger import logger, save_errors
-from app.channel.models import Channel, ChannelStat
+from app.channel.models import Channel, ChannelStat, ChannelStatus
 from app.channel.category.models import Category
 from app.channel.video.dao import VideoDAO
 from app.config import settings
@@ -41,7 +41,7 @@ class ChannelDAO(BaseDAO):
             return await ChannelBqDAO.get_ids(filters)
 
         # if not "status" in filters.keys():
-        #     filters["status"] = 1
+        #     filters["status"] = ChannelStatus.ACTIVE
         data = await cls.find_all(**filters)
         ids = [d.channel_id for d in data]
         return ids
@@ -85,7 +85,7 @@ class ChannelDAO(BaseDAO):
                         ChannelStat.report_period == report_period,
                     ),
                 )
-                .where(and_(ChannelStat.id.is_(None), Channel.status == 1))
+                .where(and_(ChannelStat.id.is_(None), Channel.status == ChannelStatus.ACTIVE))
                 .distinct()
             )
 
@@ -113,7 +113,7 @@ class ChannelDAO(BaseDAO):
         query = f"""select c.channel_id
                     from channel as c
                     left join video v on v.channel_id = c.channel_id and v.published_at_period = '{report_period.strf()}'
-                    where c.status = 1 and v.id is null"""
+                    where c.status = {ChannelStatus.ACTIVE} and v.id is null"""
         query += f" and c.category_id={category_id}" if category_id else ""
         # query += " group by c.channel_id having count(v.id) = 0"
         query = text(query)
@@ -148,7 +148,7 @@ class ChannelDAO(BaseDAO):
                 if category_id:
                     for item in data:
                         item["category_id"] = category_id
-                        item["status"] = 1
+                        item["status"] = ChannelStatus.ACTIVE
                 await cls.add_update_bulk(data, do_nothing=True)
             else:
                 logger.warning(f"{i}/{len(queries)} {query}: NOT FOUND")
@@ -183,7 +183,7 @@ class ChannelDAO(BaseDAO):
         *,
         category_id: int,
         priority: int = 100,
-        status: int = 1,
+        status: int = ChannelStatus.ACTIVE,
     ) -> dict:
         """
         Resolve YouTube handles via channels.list(forHandle=…) and upsert into channel.
@@ -319,12 +319,12 @@ class ChannelDAO(BaseDAO):
             if category_id:
                 filters = {
                     "category_id": category_id,
-                    "status": 1,
+                    "status": ChannelStatus.ACTIVE,
                 }
             else:
                 filters = {
                     "published_at": None,
-                    "status": 1,
+                    "status": ChannelStatus.ACTIVE,
                 }
 
             channel_ids = await cls.get_ids(filters=filters)
@@ -351,7 +351,7 @@ class ChannelDAO(BaseDAO):
         """
         Check channel.thumbnail_url reachability; refresh detail via YT API for broken ones.
 
-        category_id: only that category (status=1); None = all active channels.
+        category_id: only that category (ACTIVE); None = all active channels.
         """
         import aiohttp
 
@@ -361,7 +361,7 @@ class ChannelDAO(BaseDAO):
                 Channel.channel_title,
                 Channel.custom_url,
                 Channel.thumbnail_url,
-            ).where(Channel.status == 1)
+            ).where(Channel.status == ChannelStatus.ACTIVE)
             if category_id is not None:
                 q = q.where(Channel.category_id == category_id)
             rows = (await session.execute(q)).mappings().all()
@@ -492,7 +492,7 @@ class ChannelDAO(BaseDAO):
         #         query = text(query)
 
         query = select(Channel.channel_id, Channel.last_video_fetch_dt).where(
-            Channel.status == 1,
+            Channel.status == ChannelStatus.ACTIVE,
             or_(
                 Channel.last_video_fetch_dt.is_(None),
                 Channel.last_video_fetch_dt < date_to,
@@ -517,7 +517,7 @@ class ChannelDAO(BaseDAO):
         priority: int = 100,
     ):
         query = select(Channel.channel_id, Channel.last_shorts_fetch_dt).where(
-            Channel.status == 1,
+            Channel.status == ChannelStatus.ACTIVE,
             or_(
                 Channel.last_shorts_fetch_dt.is_(None),
                 Channel.last_shorts_fetch_dt < date_to,
@@ -654,7 +654,7 @@ class ChannelDAO(BaseDAO):
             async with async_session_maker() as session:
                 query = select(
                     Channel.channel_id, Channel.custom_url, Channel.thumbnail_url
-                ).where(and_(Channel.status == 1, Channel.category_id == 7))
+                ).where(and_(Channel.status == ChannelStatus.ACTIVE, Channel.category_id == 7))
                 # Channel.created_at > date_from,
 
                 result = await session.execute(query)
@@ -672,7 +672,7 @@ class ChannelDAO(BaseDAO):
     @classmethod
     async def get_channels_with_top_videos(cls, category_id: int, priority: int = 100):
         query = text(
-            """
+            f"""
             with top_videos as (
                 SELECT
                     sub.channel_id,
@@ -691,7 +691,7 @@ class ChannelDAO(BaseDAO):
                 c.channel_id, channel_title, description, priority, title_list
             from channel as c
             left join top_videos as tv on tv.channel_id = c.channel_id
-            where category_id=:category_id and status=1 and priority <= :priority
+            where category_id=:category_id and status={ChannelStatus.ACTIVE} and priority <= :priority
             order by priority
         """
         )
@@ -753,7 +753,7 @@ class ChannelDAO(BaseDAO):
         target AS (
             SELECT c.channel_id
             FROM channel AS c
-            WHERE c.status = 1
+            WHERE c.status = {ChannelStatus.ACTIVE}
               {cat_sql}
         ),
         updates AS (
@@ -779,7 +779,7 @@ class ChannelDAO(BaseDAO):
                       count(*) FILTER (WHERE priority <= 100) AS p100,
                       count(*) AS total
                     FROM channel c
-                    WHERE status = 1 {cat_sql}
+                    WHERE status = {ChannelStatus.ACTIVE} {cat_sql}
                     """
                 ),
                 params,
@@ -800,7 +800,7 @@ class ChannelDAO(BaseDAO):
                       min(priority) AS min_p,
                       max(priority) AS max_p
                     FROM channel c
-                    WHERE status = 1 {cat_sql}
+                    WHERE status = {ChannelStatus.ACTIVE} {cat_sql}
                     """
                 ),
                 params,
@@ -844,7 +844,7 @@ class ChannelStatDAO(BaseDAO):
                 .join(Channel, Channel.channel_id == ChannelStat.channel_id)
                 .where(
                     Channel.category_id == category_id,
-                    Channel.status == 1,
+                    Channel.status == ChannelStatus.ACTIVE,
                     ChannelStat.report_period.is_not(None),
                     ChannelStat.pv_score_rank.is_not(None),
                 )
@@ -926,7 +926,7 @@ class ChannelStatDAO(BaseDAO):
 
         async with async_session_maker() as session:
             where = [
-                Channel.status == 1,
+                Channel.status == ChannelStatus.ACTIVE,
                 or_(
                     Channel.channel_title.ilike(pat, escape="\\"),
                     Channel.custom_url.ilike(pat, escape="\\"),
@@ -1032,7 +1032,7 @@ class ChannelStatDAO(BaseDAO):
                 .join(Channel, Channel.channel_id == ChannelStat.channel_id)
                 .where(
                     Channel.category_id == category_id,
-                    Channel.status == 1,
+                    Channel.status == ChannelStatus.ACTIVE,
                     ChannelStat.report_period == report_period,
                     ChannelStat.pv_score_rank.is_not(None),
                 )
@@ -1141,7 +1141,7 @@ class ChannelStatDAO(BaseDAO):
                 .join(Channel, Channel.channel_id == ChannelStat.channel_id)
                 .where(
                     Channel.category_id == category_id,
-                    Channel.status == 1,
+                    Channel.status == ChannelStatus.ACTIVE,
                     ChannelStat.report_period >= oldest,
                     ChannelStat.report_period.is_not(None),
                     ChannelStat.pv_score_rank.is_not(None),
@@ -1215,7 +1215,7 @@ class ChannelStatDAO(BaseDAO):
                 if channel_ids
                 else await (
                     ChannelDAO.get_ids(
-                        {"status": 1, **({"category_id": category_id} if category_id is not None else {})}
+                        {"status": ChannelStatus.ACTIVE, **({"category_id": category_id} if category_id is not None else {})}
                     )
                     if force
                     else ChannelDAO.get_ids_wo_stat(
@@ -1310,7 +1310,7 @@ class ChannelStatDAO(BaseDAO):
 
         # --- step 4: from video_stat (+ duration) ---
         # FIX: vs.report_period = c.report_period (legacy SQL missed this)
-        sql_pv = """
+        sql_pv = f"""
             WITH channel_periods AS (
                 SELECT DISTINCT channel_id, report_period
                 FROM channel_stat
@@ -1360,7 +1360,7 @@ class ChannelStatDAO(BaseDAO):
                     ) AS pv_score_rank
                 FROM video_stats AS vs
                 JOIN channel AS ch ON ch.channel_id = vs.channel_id
-                WHERE ch.status = 1
+                WHERE ch.status = {ChannelStatus.ACTIVE}
             ),
             duration AS (
                 SELECT

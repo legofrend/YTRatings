@@ -1,3 +1,4 @@
+from enum import IntEnum
 from typing import Optional
 from sqlalchemy.orm import mapped_column, Mapped
 from sqlalchemy import (
@@ -17,6 +18,17 @@ from app.database import Base
 # Убирает предупреждения отсутствия импорта и неприятные подчеркивания в PyCharm и VSCode
 
 
+class ChannelStatus(IntEnum):
+    DELETED = 0  # удалён / недоступен
+    ACTIVE = 1
+    NO_RECENT_VIDEOS = 2  # нет видео за последние 6 мес
+    LOW_VIEWS = 3  # слишком мало просмотров
+    LOW_SUBS = 4  # мало подписчиков
+    WRONG_LANGUAGE = 5  # канал не на том языке
+    WRONG_CATEGORY = 6  # канал не в той категории
+    MANUAL_OFF = 7  # ручная деактивация
+
+
 class Channel(Base):
     __tablename__ = "channel"
     channel_id: Mapped[str] = mapped_column(unique=True)
@@ -26,7 +38,7 @@ class Channel(Base):
     thumbnail_url: Mapped[Optional[str]]
 
     category_id: Mapped[Optional[int]]
-    status: Mapped[Optional[int]]
+    status: Mapped[Optional[int]]  # ChannelStatus
     priority: Mapped[Optional[int]]
 
     published_at: Mapped[Optional[datetime]]
