@@ -57,6 +57,8 @@ Examples:
   python -m app.main wordstat-fill --cats 1 --period 2026-02 --period-to 2026-08
   python -m app.main wordstat-fill --cats 1 --period 2026-08 --top 40
   python -m app.main wordstat-type --cats 1
+  python -m app.main apply-is-short --cats 1 --ntfy info
+  python -m app.main channel-stat --ntfy error
 """
 
 from __future__ import annotations
@@ -81,6 +83,7 @@ from app.channel import (
 )
 from app.channel.playlist_shorts.dao import PlaylistShortsDAO
 from app.logger import logger
+from app import ntfy
 from app.period import Period
 from app.report.dao import ReportDAO
 
@@ -654,7 +657,29 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="edit-channels: write changes (default is dry-run)",
     )
+    p.add_argument(
+        "--ntfy",
+        choices=["off", "error", "info"],
+        default=None,
+        help="override NTFY_LEVEL for this run: off | error | info "
+        "(default: NTFY_LEVEL from .env)",
+    )
     return p
+
+
+async def _with_ntfy(name: str, coro):
+    """Notify step start/done (info) or failure (error)."""
+    ntfy.info(f"start {name}", title=f"ytr · {name}")
+    try:
+        await coro
+    except BaseException as e:
+        if isinstance(e, (KeyboardInterrupt, SystemExit)):
+            ntfy.error(f"aborted {name}: {e}", title=f"ytr · {name} aborted")
+        else:
+            ntfy.error(f"FAILED {name}: {e}", title=f"ytr · {name} FAILED")
+        raise
+    else:
+        ntfy.info(f"done {name}", title=f"ytr · {name}")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -665,16 +690,29 @@ def main(argv: list[str] | None = None) -> None:
         parser.print_help()
         return
 
+    if args.ntfy is not None:
+        ntfy.configure(level=args.ntfy)
+
+    cmds = " ".join(args.commands)
     start_dt = datetime.now()
     print("Start", start_dt)
+    ntfy.info(f"pipeline start: {cmds}", title="ytr · start")
     try:
         asyncio.run(_run_parsed(args))
-    except BaseException:
-        print("FAILED after ", datetime.now() - start_dt)
+    except BaseException as e:
+        elapsed = datetime.now() - start_dt
+        print("FAILED after ", elapsed)
+        if not isinstance(e, SystemExit) or e.code not in (0, None):
+            ntfy.error(
+                f"pipeline FAILED after {elapsed}: {cmds}\n{e}",
+                title="ytr · FAILED",
+            )
         raise
     else:
-        print("Finish after ", datetime.now() - start_dt)
+        elapsed = datetime.now() - start_dt
+        print("Finish after ", elapsed)
         print("\a")
+        ntfy.info(f"pipeline done after {elapsed}: {cmds}", title="ytr · done")
     finally:
         try:
             from app.api import yt_quota
@@ -693,19 +731,23 @@ async def _run_parsed(args: argparse.Namespace) -> None:
 
     yt_quota.ensure_loaded()
     logger.info(yt_quota.format_status())
+    logger.info(f"ntfy level={ntfy.effective_level()}")
 
     if args.commands == ["quota-status"]:
-        await cmd_quota_status()
+        await _with_ntfy("quota-status", cmd_quota_status())
         return
 
     if args.commands == ["edit-channels"]:
-        await cmd_edit_channels(
-            file=args.file,
-            channel_ref=args.edit_id,
-            category_id=args.category_id,
-            status=args.status,
-            priority=args.priority,
-            apply=args.apply,
+        await _with_ntfy(
+            "edit-channels",
+            cmd_edit_channels(
+                file=args.file,
+                channel_ref=args.edit_id,
+                category_id=args.category_id,
+                status=args.status,
+                priority=args.priority,
+                apply=args.apply,
+            ),
         )
         return
 
@@ -727,7 +769,7 @@ async def _run_parsed(args: argparse.Namespace) -> None:
     for name in args.commands:
         logger.info(f"=== {name} ===")
         if name == "videos":
-            await cmd_videos(
+            coro = cmd_videos(
                 period,
                 category_ids,
                 priority=priority,
@@ -736,15 +778,15 @@ async def _run_parsed(args: argparse.Namespace) -> None:
         elif name == "video-detail":
             # None/--cats omitted → all; else only listed cats
             cats = parse_cats(args.cats)
-            await cmd_video_detail(cats)
+            coro = cmd_video_detail(cats)
         elif name == "channel-stat":
-            await cmd_channel_stat(period, category_ids, force=args.force)
+            coro = cmd_channel_stat(period, category_ids, force=args.force)
         elif name == "video-stat":
-            await cmd_video_stat(period, category_ids, force=args.force)
+            coro = cmd_video_stat(period, category_ids, force=args.force)
         elif name == "channel-report":
-            await cmd_channel_report()
+            coro = cmd_channel_report()
         elif name == "shorts-sync":
-            await cmd_shorts_sync(
+            coro = cmd_shorts_sync(
                 period,
                 category_ids,
                 priority=priority,
@@ -753,20 +795,20 @@ async def _run_parsed(args: argparse.Namespace) -> None:
         elif name == "apply-is-short":
             # None when --cats omitted → all synced channels; else only listed cats
             cats = parse_cats(args.cats)
-            await cmd_apply_is_short(
+            coro = cmd_apply_is_short(
                 category_ids=cats,
                 channel_id=args.channel_id,
             )
         elif name == "shorts-orphans":
             cats = parse_cats(args.cats)
-            await cmd_shorts_orphans(
+            coro = cmd_shorts_orphans(
                 category_ids=cats,
                 channel_id=args.channel_id,
             )
         elif name == "backfill-denorm":
             if not args.period:
                 raise SystemExit("backfill-denorm requires --period")
-            await cmd_backfill_denorm(
+            coro = cmd_backfill_denorm(
                 Period.parse(args.period),
                 Period.parse(args.period_to) if args.period_to else None,
                 batch_size=args.batch_size,
@@ -774,17 +816,17 @@ async def _run_parsed(args: argparse.Namespace) -> None:
         elif name == "backfill-channel-denorm":
             if not args.period:
                 raise SystemExit("backfill-channel-denorm requires --period")
-            await cmd_backfill_channel_denorm(
+            coro = cmd_backfill_channel_denorm(
                 Period.parse(args.period),
                 Period.parse(args.period_to) if args.period_to else None,
             )
         elif name == "refresh-thumbnails":
-            await cmd_refresh_thumbnails(parse_cats(args.cats))
+            coro = cmd_refresh_thumbnails(parse_cats(args.cats))
         elif name == "sync-logos":
             cats = parse_cats(args.cats)
             if not cats:
                 raise SystemExit("sync-logos requires --cats (e.g. --cats 1)")
-            await cmd_sync_logos(
+            coro = cmd_sync_logos(
                 cats,
                 priority=priority,
                 workers=args.workers,
@@ -795,13 +837,13 @@ async def _run_parsed(args: argparse.Namespace) -> None:
             cats = parse_cats(args.cats)
             if not cats or len(cats) != 1:
                 raise SystemExit("add-channels requires exactly one --cats id (e.g. --cats 19)")
-            await cmd_add_channels(
+            coro = cmd_add_channels(
                 cats[0],
                 parse_handles(args.handles),
                 priority=priority,
             )
         elif name == "edit-channels":
-            await cmd_edit_channels(
+            coro = cmd_edit_channels(
                 file=args.file,
                 channel_ref=args.edit_id,
                 category_id=args.category_id,
@@ -810,23 +852,25 @@ async def _run_parsed(args: argparse.Namespace) -> None:
                 apply=args.apply,
             )
         elif name == "quota-status":
-            await cmd_quota_status()
+            coro = cmd_quota_status()
         elif name == "sync-priority":
             # None/--cats omitted → all ACTIVE channels
-            await cmd_sync_priority(parse_cats(args.cats), months=args.months)
+            coro = cmd_sync_priority(parse_cats(args.cats), months=args.months)
         elif name == "wordstat-fill":
             if not args.period:
                 raise SystemExit("wordstat-fill requires --period")
-            await cmd_wordstat_fill(
+            coro = cmd_wordstat_fill(
                 category_ids,
                 Period.parse(args.period),
                 Period.parse(args.period_to) if args.period_to else None,
                 top_n=args.top,
             )
         elif name == "wordstat-type":
-            await cmd_wordstat_type(parse_cats(args.cats))
+            coro = cmd_wordstat_type(parse_cats(args.cats))
         else:
             raise SystemExit(f"unknown command: {name}")
+
+        await _with_ntfy(name, coro)
 
         # Persist between long multi-command runs
         yt_quota.flush(reason=f"after-{name}")

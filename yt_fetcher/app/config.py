@@ -51,6 +51,13 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     ALGORITHM: str
 
+    # ntfy.sh (or self-hosted): phone/push alerts for pipeline runs.
+    # LEVEL: off = silent; error = failures only; info = start/stop steps + errors.
+    # Override per run: python -m app.main ... --ntfy info
+    NTFY_SERVER: str = "https://ntfy.sh"
+    NTFY_TOPIC: str = ""
+    NTFY_LEVEL: Literal["off", "error", "info"] = "off"
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
