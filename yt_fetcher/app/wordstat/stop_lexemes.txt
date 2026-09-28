@@ -1,0 +1,26 @@
+# FTS russian stems (lexeme), one per line. # comments / blanks ignored.
+# Surface forms like «почему» → stem «поч».
+
+эт
+новост
+short
+поч
+дня
+нов
+рф
+росс
+гордон
+
+# months (май → ма — широкий стем, может задеть лишнее)
+январ
+феврал
+март
+апрел
+ма
+июн
+июл
+август
+сентябр
+октябр
+ноябр
+декабр

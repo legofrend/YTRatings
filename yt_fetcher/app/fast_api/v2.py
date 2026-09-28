@@ -350,3 +350,37 @@ async def category_dynamics(
         "period_to": points[-1]["report_period"],
         "points": points,
     }
+
+
+@router.get("/wordstat")
+async def wordstat(
+    category_id: int = Query(..., description="Category id"),
+    period: str | None = Query(
+        None, description="Period YYYY-MM-DD; default = latest channel_stat period"
+    ),
+):
+    """Title topics for category×period.
+
+    leaving = type −1/2 of previous month; core/new = type 0/1 of requested month.
+    Empty lists (HTTP 200) when no wordstat rows.
+    """
+    from app.wordstat import WordstatDAO
+
+    if period:
+        report_period = Period.parse(period)
+    else:
+        latest = await ChannelStatDAO.latest_period(category_id)
+        if not latest:
+            return {
+                "category_id": category_id,
+                "period": None,
+                "leaving": [],
+                "core": [],
+                "new": [],
+            }
+        report_period = Period.parse(str(latest))
+
+    return await WordstatDAO.report(
+        category_id=category_id,
+        period=report_period,
+    )
