@@ -5,6 +5,7 @@ import asyncio
 
 from sqlalchemy import text
 
+from app.channel.models import ChannelStatus
 from app.database import async_session_maker
 
 
@@ -13,13 +14,13 @@ async def main() -> None:
         r = (
             await s.execute(
                 text(
-                    """
+                    f"""
                     SELECT
                       count(*) FILTER (WHERE last_shorts_fetch_dt IS NOT NULL) AS marked,
                       count(*) FILTER (WHERE last_shorts_fetch_dt IS NULL) AS unmarked,
                       count(*) AS channels
                     FROM channel
-                    WHERE category_id = 19 AND status = 1
+                    WHERE category_id = 19 AND status = {ChannelStatus.ACTIVE}
                     """
                 )
             )
@@ -46,7 +47,7 @@ async def main() -> None:
         r3 = (
             await s.execute(
                 text(
-                    """
+                    f"""
                     SELECT c.channel_id, c.custom_url, c.last_shorts_fetch_dt,
                            coalesce(n.cnt, 0) AS n_shorts
                     FROM channel c
@@ -55,7 +56,7 @@ async def main() -> None:
                       FROM playlist_shorts
                       GROUP BY channel_id
                     ) n ON n.channel_id = c.channel_id
-                    WHERE c.category_id = 19 AND c.status = 1
+                    WHERE c.category_id = 19 AND c.status = {ChannelStatus.ACTIVE}
                       AND c.last_shorts_fetch_dt IS NOT NULL
                     ORDER BY n_shorts DESC
                     LIMIT 10

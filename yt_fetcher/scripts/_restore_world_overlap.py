@@ -7,6 +7,7 @@ from pathlib import Path
 
 from sqlalchemy import text
 
+from app.channel.models import ChannelStatus
 from app.database import async_session_maker
 
 OVERLAP = Path(__file__).resolve().parents[2] / "data" / "world_category_overlap.json"
@@ -25,10 +26,10 @@ async def main() -> None:
             peer = (
                 await s.execute(
                     text(
-                        """
+                        f"""
                         SELECT priority, count(*) AS n
                         FROM channel
-                        WHERE category_id = :cat AND status = 1 AND priority <= 100
+                        WHERE category_id = :cat AND status = {ChannelStatus.ACTIVE} AND priority <= 100
                         GROUP BY priority
                         ORDER BY priority
                         LIMIT 15

@@ -39,8 +39,10 @@ function Assert-Frontend {
   }
 }
 
-$apiCmd = "& `"$Python`" -m uvicorn app.fast_api.main:app --host 127.0.0.1 --port 5000 --reload"
-$webCmd = "npm run dev"
+# Relative python: Start-Process -Command drops quotes around paths with spaces
+# (e.g. "...\4. Projects\..."), so never embed $Python absolute path here.
+$apiCmd = '& .\.venv\Scripts\python.exe -m uvicorn app.fast_api.main:app --host 127.0.0.1 --port 5000 --reload'
+$webCmd = 'npm run dev'
 
 Write-Host ""
 if (-not $WebOnly) { Write-Host "FastAPI  http://127.0.0.1:5000/docs" -ForegroundColor Cyan }
