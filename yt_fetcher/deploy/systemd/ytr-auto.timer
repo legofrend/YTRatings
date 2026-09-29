@@ -1,0 +1,10 @@
+[Unit]
+Description=Run ytr-auto.service on schedule
+
+[Timer]
+# One-shot test run; switch to `*-*-* 06:00:00 Europe/Moscow` for daily
+OnCalendar=2026-09-30 06:00:00 Europe/Moscow
+Persistent=false
+
+[Install]
+WantedBy=timers.target
