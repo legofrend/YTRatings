@@ -32,23 +32,6 @@ services:
       - o2t4_network
     restart: always
 
-  # Cron / manual: docker compose --profile ingest run --rm ingest auto
-  ingest:
-    build:
-      context: .
-      dockerfile: Dockerfile.ingest
-    image: ytr_ingest
-    env_file:
-      - .env-docker
-    volumes:
-      - ./logs:/code/logs
-    depends_on:
-      - db
-    networks:
-      - o2t4_network
-    profiles:
-      - ingest
-
 volumes:
   o2t4_postgresdata:
     name: backend_o2t4_postgresdata
