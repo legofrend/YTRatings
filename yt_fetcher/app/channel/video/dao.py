@@ -149,14 +149,27 @@ class VideoDAO(BaseDAO):
             published_at_period = report_period.next(-3)
 
         async with async_session_maker() as session:
-            query = f"""select distinct v.video_id
-                        from video as v
-                        left join channel as c on c.channel_id = v.channel_id
-                        where v.published_at_period >= '{published_at_period.strf()}'
-                        and c.status={ChannelStatus.ACTIVE} and v.status=1
-                    """
+            query = f"""
+                SELECT video_id FROM (
+                    SELECT DISTINCT
+                        v.video_id,
+                        c.priority,
+                        v.published_at_period
+                    FROM video AS v
+                    LEFT JOIN channel AS c ON c.channel_id = v.channel_id
+                    WHERE v.published_at_period >= '{published_at_period.strf()}'
+                      AND c.status = {ChannelStatus.ACTIVE}
+                      AND v.status = 1
+            """
             if category_id:
-                query += f" and c.category_id={category_id}"
+                query += f" AND c.category_id = {category_id}"
+            query += """
+                ) AS sub
+                ORDER BY
+                    priority ASC NULLS LAST,
+                    published_at_period DESC NULLS LAST,
+                    video_id
+            """
             query = text(query)
             result = await session.execute(query)
             data = result.mappings().all()
@@ -182,15 +195,31 @@ class VideoDAO(BaseDAO):
             published_at_period = report_period.next(-3)
 
         async with async_session_maker() as session:
-            query = f"""select distinct v.video_id
-                        from video as v
-                        left join channel as c on c.channel_id = v.channel_id
-                        left join video_stat vs on v.video_id = vs.video_id and vs.report_period = '{report_period.strf()}'
-                        where vs.id is null and v.published_at_period >= '{published_at_period.strf()}'
-                        and c.status={ChannelStatus.ACTIVE} and v.status=1
-                    """
+            query = f"""
+                SELECT video_id FROM (
+                    SELECT DISTINCT
+                        v.video_id,
+                        c.priority,
+                        v.published_at_period
+                    FROM video AS v
+                    LEFT JOIN channel AS c ON c.channel_id = v.channel_id
+                    LEFT JOIN video_stat AS vs
+                        ON v.video_id = vs.video_id
+                       AND vs.report_period = '{report_period.strf()}'
+                    WHERE vs.id IS NULL
+                      AND v.published_at_period >= '{published_at_period.strf()}'
+                      AND c.status = {ChannelStatus.ACTIVE}
+                      AND v.status = 1
+            """
             if category_id:
-                query += f" and c.category_id={category_id}"
+                query += f" AND c.category_id = {category_id}"
+            query += """
+                ) AS sub
+                ORDER BY
+                    priority ASC NULLS LAST,
+                    published_at_period DESC NULLS LAST,
+                    video_id
+            """
             query = text(query)
             result = await session.execute(query)
             data = result.mappings().all()

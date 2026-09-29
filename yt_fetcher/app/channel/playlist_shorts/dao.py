@@ -129,10 +129,14 @@ class PlaylistShortsDAO(BaseDAO):
         date_to: datetime,
         *,
         channel_ids: list[str] | None = None,
-        priority: int = 100,
+        priority: int | None = 100,
+        priority_gt: int | None = None,
         max_result: int = 5000,
         only_missing: bool = False,
-    ) -> None:
+    ) -> str:
+        """Sync UUSH. Returns 'ok' | 'quota_warn' | 'quota_exceeded'."""
+        import app.api.ytapi as yt
+        from app.api import yt_quota
         from app.channel.dao import ChannelDAO
 
         if channel_ids:
@@ -144,13 +148,14 @@ class PlaylistShortsDAO(BaseDAO):
                     category_id=category_id,
                     date_to=date_to.date(),
                     priority=priority,
+                    priority_gt=priority_gt,
                     only_missing=only_missing,
                 )
                 channels.extend(part)
 
         if not channels:
             logger.warning("No channels to sync shorts")
-            return
+            return "ok"
 
         fetch_marker = min(datetime.now(), date_to)
         total = len(channels)
@@ -159,7 +164,18 @@ class PlaylistShortsDAO(BaseDAO):
             f"{' only_missing' if only_missing else ''}"
         )
 
+        stop_reason: str | None = None
         for index, channel in enumerate(channels, start=1):
+            if yt_quota.is_at_warn() or yt.IS_QUOTA_EXCEEDED:
+                stop_reason = (
+                    "quota_exceeded" if yt.IS_QUOTA_EXCEEDED else "quota_warn"
+                )
+                logger.warning(
+                    f"shorts-sync: soft-stop ({stop_reason}) "
+                    f"at channel {index}/{total}"
+                )
+                break
+
             channel_id = channel["channel_id"]
             last = channel.get("last_shorts_fetch_dt")
             # Cold channel: pull same 3-mo window as video cold-start.
@@ -182,12 +198,29 @@ class PlaylistShortsDAO(BaseDAO):
             logger.info(
                 f"{index}/{total}: {channel_id} window=[{ch_from} .. {date_to})"
             )
-            count = await cls.sync_from_playlist(
-                channel_id,
-                date_from=ch_from,
-                date_to=date_to,
-                max_result=max_result,
-            )
+            try:
+                count = await cls.sync_from_playlist(
+                    channel_id,
+                    date_from=ch_from,
+                    date_to=date_to,
+                    max_result=max_result,
+                )
+            except yt.QuotaExceededException:
+                yt.IS_QUOTA_EXCEEDED = True
+                stop_reason = "quota_exceeded"
+                logger.warning(
+                    f"{channel_id}: quota exceeded; not advancing last_shorts_fetch_dt"
+                )
+                break
+
+            if yt.IS_QUOTA_EXCEEDED:
+                stop_reason = "quota_exceeded"
+                logger.warning(
+                    f"{channel_id}: quota exceeded during shorts sync; "
+                    "not advancing last_shorts_fetch_dt"
+                )
+                break
+
             if count is None:
                 logger.error(f"{channel_id}: skipped last_shorts_fetch_dt (upsert failed)")
                 continue
@@ -196,3 +229,5 @@ class PlaylistShortsDAO(BaseDAO):
                 {"channel_id": channel_id},
                 {"last_shorts_fetch_dt": fetch_marker},
             )
+
+        return stop_reason or "ok"

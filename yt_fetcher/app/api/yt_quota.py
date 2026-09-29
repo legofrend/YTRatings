@@ -22,8 +22,6 @@ from app.logger import logger
 QUOTA_DIR = Path("logs/yt_quota")
 STATE_NAME = "current.json"
 FLUSH_EVERY = 1000
-DEFAULT_LIMIT = 10_000
-WARN_RATIO = 0.85
 PT = ZoneInfo("America/Los_Angeles")
 
 # Classic Data API unit costs (combined daily pool). Approximate.
@@ -39,10 +37,29 @@ _used = 0
 _by_op: dict[str, int] = {}
 _day_pt: str | None = None
 _since_flush = 0
-_limit = DEFAULT_LIMIT
+_limit = 10_000
+_warn_at = 9500
 _hooks_installed = False
 _warned = False
 _prev_signals: dict[int, Any] = {}
+
+
+def _configured_limit() -> int:
+    from app.config import settings
+
+    return int(settings.YT_QUOTA_LIMIT)
+
+
+def _configured_warn_at() -> int:
+    from app.config import settings
+
+    return int(settings.YT_QUOTA_WARN_AT)
+
+
+def _apply_config_limits() -> None:
+    global _limit, _warn_at
+    _limit = _configured_limit()
+    _warn_at = _configured_warn_at()
 
 
 def _day_key(now: datetime | None = None) -> str:
@@ -75,15 +92,17 @@ def _snapshot() -> dict[str, Any]:
         "used": _used,
         "by_op": dict(sorted(_by_op.items())),
         "limit": _limit,
+        "warn_at": _warn_at,
         "flush_every": FLUSH_EVERY,
         "updated_at": datetime.now(tz=timezone.utc).isoformat(),
     }
 
 
 def _load_unlocked() -> None:
-    global _used, _by_op, _day_pt, _since_flush, _limit, _warned
+    global _used, _by_op, _day_pt, _since_flush, _warned
     today = _day_key()
     path = _state_path()
+    _apply_config_limits()
     if not path.exists():
         _used = 0
         _by_op = {}
@@ -118,9 +137,8 @@ def _load_unlocked() -> None:
     _used = int(raw.get("used") or 0)
     by = raw.get("by_op") or {}
     _by_op = {str(k): int(v) for k, v in by.items()} if isinstance(by, dict) else {}
-    _limit = int(raw.get("limit") or DEFAULT_LIMIT)
     _since_flush = 0
-    _warned = _used >= int(_limit * WARN_RATIO)
+    _warned = _used >= _warn_at
 
 
 def _flush_unlocked(*, reason: str = "") -> None:
@@ -149,6 +167,8 @@ def flush(reason: str = "manual") -> dict[str, Any]:
             today = _day_key()
             if _day_pt != today:
                 _load_unlocked()
+            else:
+                _apply_config_limits()
         _flush_unlocked(reason=reason)
         return _snapshot()
 
@@ -161,10 +181,17 @@ def status() -> dict[str, Any]:
             today = _day_key()
             if _day_pt != today:
                 _load_unlocked()
+            else:
+                _apply_config_limits()
         snap = _snapshot()
         snap["remaining"] = max(0, int(snap["limit"]) - int(snap["used"]))
-        snap["warn_at"] = int(int(snap["limit"]) * WARN_RATIO)
         return snap
+
+
+def is_at_warn() -> bool:
+    """True when local estimate reached YT_QUOTA_WARN_AT (soft stop for harvest)."""
+    snap = status()
+    return int(snap["used"]) >= int(snap["warn_at"])
 
 
 def add(op: str, units: int | None = None) -> int:
@@ -189,10 +216,11 @@ def add(op: str, units: int | None = None) -> int:
         _by_op[op] = _by_op.get(op, 0) + cost
         _since_flush += cost
 
-        if not _warned and _used >= int(_limit * WARN_RATIO):
+        if not _warned and _used >= _warn_at:
             _warned = True
             logger.warning(
-                f"yt_quota: {_used}/{_limit} units (~{100 * _used / _limit:.0f}%) "
+                f"yt_quota: {_used}/{_limit} units "
+                f"(warn_at={_warn_at}, ~{100 * _used / _limit:.0f}%) "
                 f"day_pt={_day_pt}"
             )
 
@@ -246,7 +274,8 @@ def format_status(snap: dict[str, Any] | None = None) -> str:
     s = snap or status()
     lines = [
         f"yt_quota day_pt={s.get('day_pt')} used={s.get('used')}/"
-        f"{s.get('limit')} remaining={s.get('remaining')}",
+        f"{s.get('limit')} remaining={s.get('remaining')} "
+        f"warn_at={s.get('warn_at')}",
     ]
     by = s.get("by_op") or {}
     if by:

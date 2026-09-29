@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     YT_API_ROOT_URL: str = "https://www.googleapis.com/"
     # Null-duration backfill: DB keyset page size (API still chunks by 50).
     YT_DETAIL_BATCH_SIZE: int = 5000
+    # Local YT Data API quota estimate (logs/yt_quota/). Soft-stop harvest at WARN_AT.
+    YT_QUOTA_LIMIT: int = 10_000
+    YT_QUOTA_WARN_AT: int = 9500
     # apply-is-short: video rows per UPDATE batch (one statement: TRUE/FALSE via LEFT JOIN).
     APPLY_IS_SHORT_VIDEO_BATCH: int = 5000
     OAI_API_KEY: str

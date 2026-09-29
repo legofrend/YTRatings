@@ -194,7 +194,16 @@ class ReportDAO(BaseDAO):
 
     @classmethod
     async def refresh_channel_report(cls) -> dict:
-        """Materialize report_view → public.channel_report (drop/recreate + indexes)."""
+        """OBSOLETE: materialize report_view → channel_report table.
+
+        API v2 reads channel_stat/video_stat denorm. Prefer CLI:
+        `python -m app.main channel-report --period YYYY-MM`
+        (= backfill-denorm → backfill-channel-denorm).
+        """
+        logger.warning(
+            "refresh_channel_report is obsolete; use channel-report CLI "
+            "(backfill-denorm + backfill-channel-denorm)"
+        )
         statements = [
             "DROP TABLE IF EXISTS channel_report",
             "CREATE TABLE channel_report AS SELECT * FROM report_view",

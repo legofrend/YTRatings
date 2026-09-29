@@ -59,7 +59,8 @@ class ChannelBqDAO:
         cls,
         category_id: int | None = None,
         date_to: date | None = None,
-        priority: int = 100,
+        priority: int | None = 100,
+        priority_gt: int | None = None,
     ) -> list[dict]:
         date_to = date_to or date.today()
         # last_video_fetch_dt is TIMESTAMP — compare as DATE
@@ -70,13 +71,18 @@ class ChannelBqDAO:
             WHERE c.status = {ChannelStatus.ACTIVE}
               AND (c.last_video_fetch_dt IS NULL
                    OR DATE(c.last_video_fetch_dt) < @date_to)
-              AND c.priority <= @priority
         """
-        params: dict = {"date_to": date_to, "priority": priority}
+        params: dict = {"date_to": date_to}
+        if priority is not None:
+            sql += " AND c.priority <= @priority"
+            params["priority"] = priority
+        if priority_gt is not None:
+            sql += " AND (c.priority IS NULL OR c.priority > @priority_gt)"
+            params["priority_gt"] = priority_gt
         if category_id is not None:
             sql += " AND c.category_id = @category_id"
             params["category_id"] = category_id
-        sql += " ORDER BY c.last_video_fetch_dt DESC LIMIT 1000"
+        sql += " ORDER BY c.last_video_fetch_dt ASC NULLS FIRST LIMIT 1000"
         rows = bq_write.query_rows(sql, params)
         logger.info(f"BQ get_channels_to_fetch_videos: {len(rows)}")
         return rows

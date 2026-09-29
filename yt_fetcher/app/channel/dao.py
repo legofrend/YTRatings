@@ -468,28 +468,25 @@ class ChannelDAO(BaseDAO):
         cls,
         category_id: int = None,
         date_to: date = date.today(),
-        priority: int = 100,
+        priority: int | None = 100,
+        priority_gt: int | None = None,
     ):
+        """Active channels with last_video_fetch_dt < date_to.
+
+        priority: ceiling (priority <= N). None = no upper bound.
+        priority_gt: floor exclusive (priority > N OR priority IS NULL).
+        Oldest / never-fetched first so fresh top channels don't burn quota
+        before the long tail.
+        """
         if _raw_is_bq():
             from app.channel.dao_bq import ChannelBqDAO
 
             return await ChannelBqDAO.get_channels_to_fetch_videos(
-                category_id=category_id, date_to=date_to, priority=priority
+                category_id=category_id,
+                date_to=date_to,
+                priority=priority,
+                priority_gt=priority_gt,
             )
-
-        #         query = f"""
-        # select
-        #     ch.channel_id, ch.last_video_fetch_dt
-
-        # from channel_stat_change as csc
-        #     left join channel ch on csc.channel_id = ch.channel_id
-        #     left join category as c on ch.category_id = c.id
-        # where total_view_count_change is not null
-        #     and (ch.last_video_fetch_dt  is null or ch.last_video_fetch_dt < '{date_to}')
-        #     and category_id={category_id} and csc.report_period='2025-03-01'
-        # order by csc.report_period desc, c.id, total_view_count_change desc
-        # """
-        #         query = text(query)
 
         query = select(Channel.channel_id, Channel.last_video_fetch_dt).where(
             Channel.status == ChannelStatus.ACTIVE,
@@ -497,16 +494,22 @@ class ChannelDAO(BaseDAO):
                 Channel.last_video_fetch_dt.is_(None),
                 Channel.last_video_fetch_dt < date_to,
             ),
-            Channel.priority <= priority,
         )
+        if priority is not None:
+            query = query.where(Channel.priority <= priority)
+        if priority_gt is not None:
+            query = query.where(
+                or_(Channel.priority.is_(None), Channel.priority > priority_gt)
+            )
         if category_id:
             query = query.where(Channel.category_id == category_id)
-        query = query.limit(1000).order_by(Channel.last_video_fetch_dt.desc())
+        query = query.limit(1000).order_by(
+            Channel.last_video_fetch_dt.asc().nullsfirst()
+        )
 
         async with async_session_maker() as session:
             result = await session.execute(query)
             data = result.mappings().all()
-            # data = [item["channel_id"] for item in data]
             return data
 
     @classmethod
@@ -514,7 +517,8 @@ class ChannelDAO(BaseDAO):
         cls,
         category_id: int = None,
         date_to: date = date.today(),
-        priority: int = 100,
+        priority: int | None = 100,
+        priority_gt: int | None = None,
         *,
         only_missing: bool = False,
     ):
@@ -522,6 +526,7 @@ class ChannelDAO(BaseDAO):
 
         Default: last_shorts_fetch_dt IS NULL or < date_to (incremental).
         only_missing=True: never synced only (backfill).
+        Oldest / never-synced first (same rationale as videos).
         """
         fetch_filter = (
             Channel.last_shorts_fetch_dt.is_(None)
@@ -534,11 +539,18 @@ class ChannelDAO(BaseDAO):
         query = select(Channel.channel_id, Channel.last_shorts_fetch_dt).where(
             Channel.status == ChannelStatus.ACTIVE,
             fetch_filter,
-            Channel.priority <= priority,
         )
+        if priority is not None:
+            query = query.where(Channel.priority <= priority)
+        if priority_gt is not None:
+            query = query.where(
+                or_(Channel.priority.is_(None), Channel.priority > priority_gt)
+            )
         if category_id:
             query = query.where(Channel.category_id == category_id)
-        query = query.limit(1000).order_by(Channel.last_shorts_fetch_dt.desc().nullsfirst())
+        query = query.limit(1000).order_by(
+            Channel.last_shorts_fetch_dt.asc().nullsfirst()
+        )
 
         async with async_session_maker() as session:
             result = await session.execute(query)
@@ -551,9 +563,14 @@ class ChannelDAO(BaseDAO):
         channel_ids: list[str] | str = None,
         date_from: date = None,
         date_to: date = None,
-        priority: int = 100,
+        priority: int | None = 100,
+        priority_gt: int | None = None,
         # period: Period | tuple[datetime, datetime] = Period(),
-    ):
+    ) -> str:
+        """Fetch new uploads. Returns 'ok' | 'quota_warn' | 'quota_exceeded'."""
+        import app.api.ytapi as yt
+        from app.api import yt_quota
+
         if isinstance(category_ids, int):
             category_ids = [category_ids]
         if channel_ids and category_ids:
@@ -565,8 +582,11 @@ class ChannelDAO(BaseDAO):
         # beyond this belong to the next period.
         date_to = date_to or date.today()
         period_end = datetime.combine(date_to, datetime.min.time())
+        stop_reason: str | None = None
 
         for i, category_id in enumerate(category_ids, start=1):
+            if stop_reason:
+                break
             if channel_ids:
                 channels = [
                     {"channel_id": channel_id, "last_video_fetch_dt": None}
@@ -577,11 +597,22 @@ class ChannelDAO(BaseDAO):
                     date_to=date_to,
                     category_id=category_id,
                     priority=priority,
+                    priority_gt=priority_gt,
                 )
             logger.info(
                 f"Category {i}/{len(category_ids)}: {category_id=} {len(channels)} channels"
             )
             for index, channel in enumerate(channels, start=1):
+                if yt_quota.is_at_warn() or yt.IS_QUOTA_EXCEEDED:
+                    stop_reason = (
+                        "quota_exceeded" if yt.IS_QUOTA_EXCEEDED else "quota_warn"
+                    )
+                    logger.warning(
+                        f"fetch_new_videos: soft-stop ({stop_reason}) "
+                        f"at channel {index}/{len(channels)} cat={category_id}"
+                    )
+                    break
+
                 channel_id = channel["channel_id"]
                 last_fetched = channel["last_video_fetch_dt"]
                 is_cold = last_fetched is None
@@ -608,46 +639,63 @@ class ChannelDAO(BaseDAO):
                 # Don't claim Sept videos if we only ingested through Aug 31
                 fetch_marker = min(datetime.now(), period_end)
 
-                if is_cold:
-                    # First ingest: last 3 calendar months ending at date_to;
-                    # if channel is dormant in that window → latest 100 uploads.
-                    to_d = date_to if isinstance(date_to, date) else date_to.date()
-                    cold_from = datetime.combine(
-                        Period(to_d.month, to_d.year).next(-3), datetime.min.time()
-                    )
-                    logger.info(
-                        f"{index}/{len(channels)}: {channel_id} cold-start "
-                        f"window=[{cold_from.date()} .. {to_d})"
-                    )
-                    res = await VideoDAO.get_from_playlist(
-                        channel_id,
-                        date_from=cold_from,
-                        date_to=date_to,
-                        max_result=1000,
-                    )
-                    if not res:
+                try:
+                    if is_cold:
+                        # First ingest: last 3 calendar months ending at date_to;
+                        # if channel is dormant in that window → latest 100 uploads.
+                        to_d = date_to if isinstance(date_to, date) else date_to.date()
+                        cold_from = datetime.combine(
+                            Period(to_d.month, to_d.year).next(-3), datetime.min.time()
+                        )
                         logger.info(
-                            f"{index}/{len(channels)}: {channel_id} "
-                            f"no videos in 3mo window → last 100"
+                            f"{index}/{len(channels)}: {channel_id} cold-start "
+                            f"window=[{cold_from.date()} .. {to_d})"
                         )
                         res = await VideoDAO.get_from_playlist(
                             channel_id,
-                            date_from=None,
+                            date_from=cold_from,
                             date_to=date_to,
-                            max_result=100,
+                            max_result=1000,
                         )
-                else:
-                    logger.info(
-                        f"{index}/{len(channels)}: {channel_id}, last fetched {date_from}"
+                        if not res and not yt.IS_QUOTA_EXCEEDED:
+                            logger.info(
+                                f"{index}/{len(channels)}: {channel_id} "
+                                f"no videos in 3mo window → last 100"
+                            )
+                            res = await VideoDAO.get_from_playlist(
+                                channel_id,
+                                date_from=None,
+                                date_to=date_to,
+                                max_result=100,
+                            )
+                    else:
+                        logger.info(
+                            f"{index}/{len(channels)}: {channel_id}, last fetched {date_from}"
+                        )
+                        res = await VideoDAO.get_from_playlist(
+                            channel_id,
+                            date_from=date_from,
+                            date_to=date_to,
+                            max_result=1000,
+                        )
+                except yt.QuotaExceededException:
+                    yt.IS_QUOTA_EXCEEDED = True
+                    stop_reason = "quota_exceeded"
+                    logger.warning(
+                        f"{channel_id}: quota exceeded before fetch; "
+                        "not advancing last_video_fetch_dt"
                     )
-                    res = await VideoDAO.get_from_playlist(
-                        channel_id,
-                        date_from=date_from,
-                        date_to=date_to,
-                        max_result=1000,
+                    break
+
+                if yt.IS_QUOTA_EXCEEDED:
+                    stop_reason = "quota_exceeded"
+                    logger.warning(
+                        f"{channel_id}: quota exceeded during fetch; "
+                        "not advancing last_video_fetch_dt"
                     )
+                    break
+
                 # ToDo различать ситуации, когда видео нет из-за ошибки или их просто нет
-                # Сейчас информация last_fetched_video_dt обновится, даже если была ошибка при записи видео в БД
                 await cls.update(
                     {"channel_id": channel_id},
                     {"last_video_fetch_dt": fetch_marker},
@@ -657,7 +705,7 @@ class ChannelDAO(BaseDAO):
                 f"Category {i}/{len(category_ids)}: {category_id=}, updated {len(channels)} channels"
             )
 
-        return True
+        return stop_reason or "ok"
 
     @classmethod
     async def save_thumbnails(cls, filters: dict = {}):

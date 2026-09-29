@@ -1,0 +1,74 @@
+# Month-close pipeline. Loaded by `python -m app.main auto` (priority over harvest).
+# State (step done/pending) lives in PG table pipeline_run — not in this file.
+#
+# when: start on days 1..day_of_month_lte (Europe/Moscow).
+# If a run for this period is already unfinished, auto continues even after the window.
+# period: previous_month → on Oct 1 close September.
+#
+# After close finishes (or is skipped), auto runs inline harvest
+# (unless last day of month after 08:00 MSK).
+
+id: close
+
+when:
+  timezone: Europe/Moscow
+  day_of_month_lte: 5
+
+period: previous_month
+
+steps:
+  # 1. Channel totals for active channels missing this period's row
+  - id: channel_stat
+    cmd: channel-stat
+
+  # 2. Video stats already in DB without a row for this period
+  - id: video_stat_existing
+    cmd: video-stat
+
+  # 3. New uploads for top channels (priority <= 100), oldest fetch first
+  - id: videos_top
+    cmd: videos
+    priority_lte: 100
+    skip_detail: true
+    skip_shorts: true
+
+  - id: video_stat_top
+    cmd: video-stat
+
+  - id: detail_top
+    cmd: video-detail
+
+  - id: shorts_top
+    cmd: shorts-sync
+    priority_lte: 100
+
+  - id: is_short_top
+    cmd: apply-is-short
+
+  # 4. Partial report after top-100 path
+  - id: report_top
+    cmd: channel-report
+
+  # 5. Long tail (priority > 100 or NULL)
+  - id: videos_rest
+    cmd: videos
+    priority_gt: 100
+    skip_detail: true
+    skip_shorts: true
+
+  - id: detail_rest
+    cmd: video-detail
+
+  - id: shorts_rest
+    cmd: shorts-sync
+    priority_gt: 100
+
+  - id: is_short_rest
+    cmd: apply-is-short
+
+  - id: video_stat_rest
+    cmd: video-stat
+
+  # 6. Final report after all channels
+  - id: report_final
+    cmd: channel-report

@@ -6,7 +6,7 @@ Commands:
   videos        — fetch new videos only (use video-detail / shorts-sync separately or chained)
   video-detail  — fill video.duration via videos.list (no shorts HTTP)
   video-stat    — video_stat by category (near midnight after channel-stat; order=sort_order)
-  channel-report — materialize report_view → channel_report table in PG
+  channel-report — alias: backfill-denorm → backfill-channel-denorm (v2 denorm for period)
   shorts-sync   — fetch UUSH playlist into playlist_shorts (API quota)
   apply-is-short — set video.is_short from playlist_shorts (--cats / --channel-id optional)
   shorts-orphans — count/sample playlist_shorts missing from video (diagnostic only)
@@ -20,13 +20,14 @@ Commands:
   sync-priority — channel.priority = best pv_score_rank over last N months (default 12)
   wordstat-fill — fill wordstat top-N lexemes (longs) for cats×periods; type=NULL
   wordstat-type — backfill wordstat.type from MoM sets (−1/0/1/2)
+  auto          — close (days 1–5) and/or harvest by calendar (see scenarios/)
 
 Examples:
   python -m app.main channel-stat --cats 1
   python -m app.main channel-stat --cats 1 --force
   python -m app.main videos
   python -m app.main video-stat --force
-  python -m app.main channel-report
+  python -m app.main channel-report --period 2026-08
   python -m app.main channel-stat video-stat --period 2026-07
   python -m app.main videos --cats 1 --priority 50
   python -m app.main videos --cats 1 --skip-shorts
@@ -59,6 +60,8 @@ Examples:
   python -m app.main wordstat-type --cats 1
   python -m app.main apply-is-short --cats 1 --ntfy info
   python -m app.main channel-stat --ntfy error
+  python -m app.main auto
+  python -m app.main auto --force
 """
 
 from __future__ import annotations
@@ -157,21 +160,30 @@ async def cmd_videos(
     period: Period,
     category_ids: list[int],
     *,
-    priority: int,
+    priority: int | None,
+    priority_gt: int | None = None,
     skip_shorts: bool = False,
-) -> None:
+    skip_detail: bool = False,
+) -> str | None:
     # Exclusive end of report month (e.g. Aug → 2026-09-01). Videos on/after
     # this date belong to the next period.
     date_to = period.next(1)
     logger.info(
         f"videos fetch period={period} until={date_to} "
-        f"cats={category_ids} priority={priority}"
+        f"cats={category_ids} priority={priority} priority_gt={priority_gt}"
     )
-    await ChannelDAO.fetch_new_videos(
+    status = await ChannelDAO.fetch_new_videos(
         category_ids=category_ids,
         date_to=date_to,
         priority=priority,
+        priority_gt=priority_gt,
     )
+    if status != "ok":
+        logger.warning(f"videos fetch stopped: {status}")
+        return status
+    if skip_detail:
+        logger.info("videos detail/shorts skipped (--skip-detail / scenario)")
+        return None
     # Duration/detail — separate from shorts (UUSH path below or video-detail cmd)
     logger.info("videos detail (duration / missing fields)")
     import app.api.ytapi as yt
@@ -185,16 +197,23 @@ async def cmd_videos(
         logger.warning(
             "yt quota exceeded after video-detail; skipping shorts-sync"
         )
-        return
+        return "quota_exceeded"
     if skip_shorts:
         logger.info("videos is_short skipped (--skip-shorts)")
-        return
+        return None
     # New path: UUSH playlist → playlist_shorts → video.is_short
     logger.info("videos shorts-sync (UUSH API) + apply-is-short")
-    await cmd_shorts_sync(
-        period, category_ids, priority=priority, channel_id=None
+    short_status = await cmd_shorts_sync(
+        period,
+        category_ids,
+        priority=priority,
+        priority_gt=priority_gt,
+        channel_id=None,
     )
+    if short_status:
+        return short_status
     await cmd_apply_is_short(category_ids=category_ids, channel_id=None)
+    return None
 
 
 async def cmd_video_detail(category_ids: list[int] | None) -> None:
@@ -239,34 +258,55 @@ async def cmd_publish(period: Period, category_ids: list[int]) -> None:
             raise SystemExit("publish build_in_pg failed")
 
 
-async def cmd_channel_report() -> None:
-    logger.info("channel-report: materialize report_view → channel_report")
-    await ReportDAO.refresh_channel_report()
+async def cmd_channel_report(
+    period_from: Period,
+    period_to: Period | None = None,
+    *,
+    batch_size: int = 10_000,
+) -> None:
+    """Alias for the paired denorm backfills used by API v2.
+
+    Old materialize report_view→channel_report is obsolete (ReportDAO.refresh_channel_report).
+    """
+    logger.info(
+        "channel-report: alias → backfill-denorm + backfill-channel-denorm "
+        f"period={period_from.strf('%p')}"
+        + (f"..{period_to.strf('%p')}" if period_to else "")
+    )
+    await cmd_backfill_denorm(period_from, period_to, batch_size=batch_size)
+    await cmd_backfill_channel_denorm(period_from, period_to)
 
 
 async def cmd_shorts_sync(
     period: Period,
     category_ids: list[int],
     *,
-    priority: int,
+    priority: int | None,
+    priority_gt: int | None = None,
     channel_id: str | None = None,
     only_missing: bool = False,
-) -> None:
+) -> str | None:
     date_from = datetime.combine(period, datetime.min.time())
     date_to = datetime.combine(period.next(1), datetime.min.time())
     channel_ids = [channel_id] if channel_id else None
     logger.info(
         f"shorts-sync period={period} window=[{date_from} .. {date_to}) "
-        f"cats={category_ids} channel_id={channel_id} only_missing={only_missing}"
+        f"cats={category_ids} channel_id={channel_id} only_missing={only_missing} "
+        f"priority={priority} priority_gt={priority_gt}"
     )
-    await PlaylistShortsDAO.sync_channels(
+    status = await PlaylistShortsDAO.sync_channels(
         category_ids=category_ids,
         date_from=date_from,
         date_to=date_to,
         channel_ids=channel_ids,
         priority=priority,
+        priority_gt=priority_gt,
         only_missing=only_missing,
     )
+    if status != "ok":
+        logger.warning(f"shorts-sync stopped: {status}")
+        return status
+    return None
 
 
 async def cmd_shorts_orphans(
@@ -546,6 +586,7 @@ COMMANDS = {
     "sync-priority": cmd_sync_priority,
     "wordstat-fill": cmd_wordstat_fill,
     "wordstat-type": cmd_wordstat_type,
+    "auto": None,  # handled in _run_parsed
 }
 
 
@@ -558,7 +599,7 @@ def build_parser() -> argparse.ArgumentParser:
         "commands",
         nargs="*",
         choices=list(COMMANDS),
-        help="one or more: channel-stat | videos | video-detail | video-stat | channel-report | shorts-sync | apply-is-short | shorts-orphans | backfill-denorm | backfill-channel-denorm | refresh-thumbnails | sync-logos | add-channels | edit-channels | quota-status | sync-priority | wordstat-fill | wordstat-type",
+        help="one or more: channel-stat | videos | video-detail | video-stat | channel-report | shorts-sync | apply-is-short | shorts-orphans | backfill-denorm | backfill-channel-denorm | refresh-thumbnails | sync-logos | add-channels | edit-channels | quota-status | sync-priority | wordstat-fill | wordstat-type | auto",
     )
     p.add_argument(
         "--period",
@@ -568,13 +609,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--period-to",
         default=None,
-        help="backfill-denorm / wordstat-fill: inclusive end period YYYY-MM (with --period as start)",
+        help="backfill-denorm / channel-report / wordstat-fill: inclusive end period YYYY-MM (with --period as start)",
     )
     p.add_argument(
         "--batch-size",
         type=int,
         default=10_000,
-        help="backfill-denorm: rows per UPDATE batch (default 10000)",
+        help="backfill-denorm / channel-report: rows per UPDATE batch (default 10000)",
     )
     p.add_argument(
         "--top",
@@ -609,6 +650,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--skip-shorts",
         action="store_true",
         help="videos: skip UUSH shorts-sync + apply-is-short after detail",
+    )
+    p.add_argument(
+        "--skip-detail",
+        action="store_true",
+        help="videos: only fetch playlist items (no duration / shorts)",
+    )
+    p.add_argument(
+        "--priority-gt",
+        type=int,
+        default=None,
+        help="videos/shorts-sync: only channels with priority > N (or NULL)",
     )
     p.add_argument(
         "--channel-id",
@@ -744,6 +796,16 @@ async def _run_parsed(args: argparse.Namespace) -> None:
         await _with_ntfy("quota-status", cmd_quota_status())
         return
 
+    if args.commands == ["auto"]:
+        from app.pipeline.runner import run_auto
+
+        cats = await resolve_category_ids(parse_cats(args.cats))
+        await _with_ntfy(
+            "auto",
+            run_auto(category_ids=cats, force=args.force),
+        )
+        return
+
     if args.commands == ["edit-channels"]:
         await _with_ntfy(
             "edit-channels",
@@ -770,8 +832,12 @@ async def _run_parsed(args: argparse.Namespace) -> None:
     period = parse_period(args.period)
     category_ids = await resolve_category_ids(parse_cats(args.cats))
     priority = 100 if args.priority is None else args.priority
+    priority_gt = args.priority_gt
 
-    logger.info(f"period={period} cats={category_ids} commands={args.commands}")
+    logger.info(
+        f"period={period} cats={category_ids} commands={args.commands} "
+        f"priority={priority} priority_gt={priority_gt}"
+    )
 
     for name in args.commands:
         logger.info(f"=== {name} ===")
@@ -780,7 +846,9 @@ async def _run_parsed(args: argparse.Namespace) -> None:
                 period,
                 category_ids,
                 priority=priority,
+                priority_gt=priority_gt,
                 skip_shorts=args.skip_shorts,
+                skip_detail=args.skip_detail,
             )
         elif name == "video-detail":
             # None/--cats omitted → all; else only listed cats
@@ -791,12 +859,19 @@ async def _run_parsed(args: argparse.Namespace) -> None:
         elif name == "video-stat":
             coro = cmd_video_stat(period, category_ids, force=args.force)
         elif name == "channel-report":
-            coro = cmd_channel_report()
+            if not args.period:
+                raise SystemExit("channel-report requires --period")
+            coro = cmd_channel_report(
+                Period.parse(args.period),
+                Period.parse(args.period_to) if args.period_to else None,
+                batch_size=args.batch_size,
+            )
         elif name == "shorts-sync":
             coro = cmd_shorts_sync(
                 period,
                 category_ids,
                 priority=priority,
+                priority_gt=priority_gt,
                 channel_id=args.channel_id,
                 only_missing=args.only_missing,
             )

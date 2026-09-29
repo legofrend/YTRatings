@@ -121,16 +121,27 @@ class VideoStatBqDAO:
         video = bq_write.table_fqn("video")
         channel = bq_write.table_fqn("channel")
         sql = f"""
-            SELECT DISTINCT v.video_id
-            FROM `{video}` AS v
-            LEFT JOIN `{channel}` AS c ON c.channel_id = v.channel_id
-            WHERE v.published_at_period >= @published_at_period
-              AND c.status = {ChannelStatus.ACTIVE} AND v.status = 1
+            SELECT video_id FROM (
+                SELECT DISTINCT
+                    v.video_id,
+                    c.priority,
+                    v.published_at_period
+                FROM `{video}` AS v
+                LEFT JOIN `{channel}` AS c ON c.channel_id = v.channel_id
+                WHERE v.published_at_period >= @published_at_period
+                  AND c.status = {ChannelStatus.ACTIVE} AND v.status = 1
         """
         params: dict = {"published_at_period": published_at_period}
         if category_id is not None:
             sql += " AND c.category_id = @category_id"
             params["category_id"] = category_id
+        sql += """
+            )
+            ORDER BY
+                priority ASC NULLS LAST,
+                published_at_period DESC NULLS LAST,
+                video_id
+        """
         rows = bq_write.query_rows(sql, params)
         ids = [r["video_id"] for r in rows]
         logger.info(f"BQ get_ids_for_stat videos: {len(ids)}")
@@ -150,14 +161,18 @@ class VideoStatBqDAO:
         channel = bq_write.table_fqn("channel")
         video_stat = bq_write.table_fqn("video_stat")
         sql = f"""
-            SELECT DISTINCT v.video_id
-            FROM `{video}` AS v
-            LEFT JOIN `{channel}` AS c ON c.channel_id = v.channel_id
-            LEFT JOIN `{video_stat}` AS vs
-              ON v.video_id = vs.video_id AND vs.report_period = @report_period
-            WHERE vs.id IS NULL
-              AND v.published_at_period >= @published_at_period
-              AND c.status = {ChannelStatus.ACTIVE} AND v.status = 1
+            SELECT video_id FROM (
+                SELECT DISTINCT
+                    v.video_id,
+                    c.priority,
+                    v.published_at_period
+                FROM `{video}` AS v
+                LEFT JOIN `{channel}` AS c ON c.channel_id = v.channel_id
+                LEFT JOIN `{video_stat}` AS vs
+                  ON v.video_id = vs.video_id AND vs.report_period = @report_period
+                WHERE vs.id IS NULL
+                  AND v.published_at_period >= @published_at_period
+                  AND c.status = {ChannelStatus.ACTIVE} AND v.status = 1
         """
         params: dict = {
             "report_period": report_period,
@@ -166,6 +181,13 @@ class VideoStatBqDAO:
         if category_id is not None:
             sql += " AND c.category_id = @category_id"
             params["category_id"] = category_id
+        sql += """
+            )
+            ORDER BY
+                priority ASC NULLS LAST,
+                published_at_period DESC NULLS LAST,
+                video_id
+        """
         rows = bq_write.query_rows(sql, params)
         ids = [r["video_id"] for r in rows]
         logger.info(f"BQ get_ids_wo_stat videos: {len(ids)}")
