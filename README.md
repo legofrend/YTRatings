@@ -103,7 +103,7 @@ ssh root@o2t4.ru
 ```
 
 Git Bash / WSL: `./scripts/deploy-ytr.sh -m "..."`.  
-`channel_logo/` на VPS не затирается. SSG по умолчанию с `https://ytr.o2t4.ru/api/ytr/v2`.
+`channel_logo/` и `wordstat_img/` на VPS не в git и не затираются деплоем (живут в `frontend/dist/`). SSG по умолчанию с `https://ytr.o2t4.ru/api/ytr/v2`.
 
 ### Типичный ручной деплой
 
@@ -115,7 +115,7 @@ git fetch && git checkout <branch> && git pull
 cd yt_fetcher && docker compose up -d --build
 
 # Frontend SSG: собрать локально (нужен API с sys_name), залить .output/public → frontend/dist/
-# Не затирать channel_logo/; empty.png и остальной static — да.
+# Не затирать channel_logo/ и wordstat_img/; empty.png и остальной static — да.
 # nginx: try_files $uri $uri/ $uri/index.html =404;
 ```
 

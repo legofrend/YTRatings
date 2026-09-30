@@ -94,9 +94,9 @@ if (-not $SkipGenerate) {
     throw "SSG output missing: $ssgOut"
   }
 
-  Step "Mirror SSG to frontend/dist (keep local channel_logo/)"
+  Step "Mirror SSG to frontend/dist (keep local channel_logo/ + wordstat_img/)"
   New-Item -ItemType Directory -Force -Path $distLocal | Out-Null
-  robocopy $ssgOut $distLocal /E /XD channel_logo /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
+  robocopy $ssgOut $distLocal /E /XD channel_logo wordstat_img /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
   if ($LASTEXITCODE -ge 8) {
     throw "robocopy failed (exit $LASTEXITCODE)"
   }
@@ -116,11 +116,11 @@ if (-not $SkipFrontend) {
   if (-not (Test-Path $distLocal)) {
     throw "Local frontend/dist missing - run without -SkipGenerate first"
   }
-  Step "Sync frontend/dist to VPS (exclude channel_logo/)"
+  Step "Sync frontend/dist to VPS (exclude channel_logo/ + wordstat_img/)"
   $remoteDist = "$RemoteRoot/frontend/dist"
   # PowerShell '|' corrupts binary streams - use cmd.exe for tar|ssh
   $distUnix = ($distLocal -replace '\\', '/')
-  $cmd = "tar -C `"$distLocal`" --exclude=channel_logo -cf - . | ssh $RemoteHost `"mkdir -p '$remoteDist' && tar -xf - -C '$remoteDist'`""
+  $cmd = "tar -C `"$distLocal`" --exclude=channel_logo --exclude=wordstat_img -cf - . | ssh $RemoteHost `"mkdir -p '$remoteDist' && tar -xf - -C '$remoteDist'`""
   cmd.exe /c $cmd
   Assert-Ok "frontend sync"
 

@@ -74,14 +74,17 @@ if [[ "$SKIP_GENERATE" -eq 0 ]]; then
   )
   [[ -d "$SSG_OUT" ]] || { echo "SSG output missing: $SSG_OUT"; exit 1; }
 
-  step "Mirror SSG → frontend/dist (keep channel_logo/)"
+  step "Mirror SSG → frontend/dist (keep channel_logo/ + wordstat_img/)"
   mkdir -p "$DIST_LOCAL"
   if command -v rsync >/dev/null 2>&1; then
-    rsync -a --delete --exclude 'channel_logo/' "$SSG_OUT"/ "$DIST_LOCAL"/
+    rsync -a --delete --exclude 'channel_logo/' --exclude 'wordstat_img/' "$SSG_OUT"/ "$DIST_LOCAL"/
   else
     # portable fallback
-    find "$DIST_LOCAL" -mindepth 1 ! -path '*/channel_logo/*' ! -name 'channel_logo' -exec rm -rf {} + 2>/dev/null || true
-    tar -C "$SSG_OUT" -cf - . | tar -C "$DIST_LOCAL" -xf -
+    find "$DIST_LOCAL" -mindepth 1 \
+      ! -path '*/channel_logo/*' ! -name 'channel_logo' \
+      ! -path '*/wordstat_img/*' ! -name 'wordstat_img' \
+      -exec rm -rf {} + 2>/dev/null || true
+    tar -C "$SSG_OUT" --exclude=channel_logo --exclude=wordstat_img -cf - . | tar -C "$DIST_LOCAL" -xf -
   fi
 fi
 
@@ -101,10 +104,10 @@ fi
 
 if [[ "$SKIP_FRONTEND" -eq 0 ]]; then
   [[ -d "$DIST_LOCAL" ]] || { echo "frontend/dist missing"; exit 1; }
-  step "Sync frontend/dist → VPS (exclude channel_logo/)"
+  step "Sync frontend/dist → VPS (exclude channel_logo/ + wordstat_img/)"
   REMOTE_DIST="$REMOTE_ROOT/frontend/dist"
   ssh "$REMOTE_HOST" "mkdir -p '$REMOTE_DIST'"
-  tar -C "$DIST_LOCAL" --exclude=channel_logo -cf - . | ssh "$REMOTE_HOST" "tar -xf - -C '$REMOTE_DIST'"
+  tar -C "$DIST_LOCAL" --exclude=channel_logo --exclude=wordstat_img -cf - . | ssh "$REMOTE_HOST" "tar -xf - -C '$REMOTE_DIST'"
   step "nginx reload"
   ssh "$REMOTE_HOST" "nginx -t && systemctl reload nginx" || echo "WARN: nginx reload failed"
 fi

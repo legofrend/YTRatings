@@ -11,5 +11,6 @@ dist
 # regenerated on every `npm run generate` from categories API
 public/sitemap.xml
 public/robots.txt
-# local junction to logo cache — not part of the Nuxt package
+# local / VPS static assets — not in git (live under frontend/dist on VPS)
 public/channel_logo
+public/wordstat_img
