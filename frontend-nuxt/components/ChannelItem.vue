@@ -142,9 +142,14 @@ function onLogoClick(e) {
   copyEditTemplate();
 }
 
-async function loadVideos() {
+async function loadVideos(force = false) {
   if (isSyntheticVideos.value) return;
   if (!props.period) return;
+  if (force) {
+    props.item.videos_loaded_max = false;
+    props.item.videos_error = null;
+    props.item.top_videos = null;
+  }
   // already pulled max (or confirmed fewer exist) for this open/period
   if (props.item.videos_loaded_max && !props.item.videos_loading) return;
   if (
@@ -165,7 +170,8 @@ async function loadVideos() {
     props.item.top_videos = (res.videos || []).map(mapVideo);
     props.item.videos_loaded_max = true;
   } catch (err) {
-    props.item.videos_error = err.message || String(err);
+    console.warn('[channelVideos]', err);
+    props.item.videos_error = 'failed';
     props.item.top_videos = [];
   } finally {
     props.item.videos_loading = false;
@@ -176,9 +182,13 @@ function expandVideos() {
   videosLimit.value = Math.min(videosLimit.value + VIDEOS_STEP, videosCap.value);
 }
 
-async function loadHistory() {
+async function loadHistory(force = false) {
   if (isSyntheticVideos.value) return;
-  if (props.item.history != null || props.item.history_loading) return;
+  if (!force && (props.item.history != null || props.item.history_loading)) return;
+  if (force) {
+    props.item.history = null;
+    props.item.history_error = null;
+  }
 
   props.item.history_loading = true;
   props.item.history_error = null;
@@ -186,7 +196,8 @@ async function loadHistory() {
     const res = await channelDynamics(props.item.channel_id, 12);
     props.item.history = res.points || [];
   } catch (err) {
-    props.item.history_error = err.message || String(err);
+    console.warn('[channelHistory]', err);
+    props.item.history_error = 'failed';
     props.item.history = [];
   } finally {
     props.item.history_loading = false;
@@ -226,7 +237,7 @@ watch(
 <template>
   <div class="relative">
     <div
-      class="flex items-center bg-white text-black shadow-md w-full min-w-fit my-2 mx-auto rounded-lg p-1 space-x-1 md:space-x-4"
+      class="flex items-center bg-white text-black shadow-md w-full min-w-0 my-2 mx-auto rounded-lg p-1 space-x-1 md:space-x-4"
     >
       <div class="flex flex-col items-center">
         <div
@@ -345,7 +356,12 @@ watch(
         />
         Загрузка видео…
       </div>
-      <div v-else-if="item.videos_error" class="p-2 text-red-600">{{ item.videos_error }}</div>
+      <UIFetchError
+        v-else-if="item.videos_error"
+        compact
+        message="Не удалось загрузить видео"
+        @retry="loadVideos(true)"
+      />
       <div v-else-if="!item.top_videos?.length" class="p-2 text-gray-500">Нет новых видео за период</div>
       <div v-else>
         <div
@@ -371,6 +387,7 @@ watch(
         :points="item.history || []"
         :loading="item.history_loading"
         :error="item.history_error"
+        @retry="loadHistory(true)"
       />
     </div>
   </div>

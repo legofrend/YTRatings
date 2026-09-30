@@ -2,8 +2,9 @@
 Description=Run ytr-auto.service on schedule
 
 [Timer]
-# One-shot test run; switch to `*-*-* 06:00:00 Europe/Moscow` for daily
-OnCalendar=2026-09-30 06:00:00 Europe/Moscow
+# One-shot smoke test. Do NOT make daily — schedule follows harvest/close windows.
+# After test: edit OnCalendar (or disable timer) and systemctl daemon-reload.
+OnCalendar=2026-10-01 00:01:00 Europe/Moscow
 Persistent=false
 
 [Install]

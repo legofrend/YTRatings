@@ -37,6 +37,7 @@ optional = true
 
 [tool.poetry.group.dev.dependencies]
 pillow = "^11.0.0"
+wordcloud = "^1.9.4"
 pandas = "^2.2.2"
 jupyter = "^1.1.1"
 beautifulsoup4 = "^4.12.3"

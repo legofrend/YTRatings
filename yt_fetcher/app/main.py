@@ -567,6 +567,26 @@ async def cmd_wordstat_type(category_ids: list[int] | None) -> None:
     logger.info(f"wordstat-type done: {stats}")
 
 
+async def cmd_wordstat_svg(
+    category_ids: list[int],
+    period: Period,
+    period_to: Period | None,
+) -> None:
+    from app.wordstat import wordstat2svg_range
+
+    if not category_ids:
+        raise SystemExit("wordstat-svg requires --cats")
+    logger.info(
+        f"wordstat-svg cats={category_ids} period={period} period_to={period_to}"
+    )
+    stats = await wordstat2svg_range(
+        category_ids=category_ids,
+        period_from=period,
+        period_to=period_to,
+    )
+    logger.info(f"wordstat-svg done: {stats}")
+
+
 COMMANDS = {
     "channel-stat": cmd_channel_stat,
     "videos": cmd_videos,
@@ -586,6 +606,7 @@ COMMANDS = {
     "sync-priority": cmd_sync_priority,
     "wordstat-fill": cmd_wordstat_fill,
     "wordstat-type": cmd_wordstat_type,
+    "wordstat-svg": cmd_wordstat_svg,
     "auto": None,  # handled in _run_parsed
 }
 
@@ -599,7 +620,7 @@ def build_parser() -> argparse.ArgumentParser:
         "commands",
         nargs="*",
         choices=list(COMMANDS),
-        help="one or more: channel-stat | videos | video-detail | video-stat | channel-report | shorts-sync | apply-is-short | shorts-orphans | backfill-denorm | backfill-channel-denorm | refresh-thumbnails | sync-logos | add-channels | edit-channels | quota-status | sync-priority | wordstat-fill | wordstat-type | auto",
+        help="one or more: channel-stat | videos | video-detail | video-stat | channel-report | shorts-sync | apply-is-short | shorts-orphans | backfill-denorm | backfill-channel-denorm | refresh-thumbnails | sync-logos | add-channels | edit-channels | quota-status | sync-priority | wordstat-fill | wordstat-type | wordstat-svg | auto",
     )
     p.add_argument(
         "--period",
@@ -609,7 +630,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--period-to",
         default=None,
-        help="backfill-denorm / channel-report / wordstat-fill: inclusive end period YYYY-MM (with --period as start)",
+        help="backfill-denorm / channel-report / wordstat-fill / wordstat-svg: inclusive end period YYYY-MM (with --period as start)",
     )
     p.add_argument(
         "--batch-size",
@@ -950,6 +971,17 @@ async def _run_parsed(args: argparse.Namespace) -> None:
             )
         elif name == "wordstat-type":
             coro = cmd_wordstat_type(parse_cats(args.cats))
+        elif name == "wordstat-svg":
+            if not args.period:
+                raise SystemExit("wordstat-svg requires --period")
+            cats = parse_cats(args.cats)
+            if not cats:
+                raise SystemExit("wordstat-svg requires --cats")
+            coro = cmd_wordstat_svg(
+                cats,
+                Period.parse(args.period),
+                Period.parse(args.period_to) if args.period_to else None,
+            )
         else:
             raise SystemExit(f"unknown command: {name}")
 

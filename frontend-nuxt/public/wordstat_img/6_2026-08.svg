@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="420">
+<style>text{font-family:'Arial';font-weight:normal;font-style:normal;}</style>
+<rect width="100%" height="100%" style="fill:white"></rect>
+<text transform="translate(95,155)" font-size="223" style="fill:#7f7f7f">серия</text>
+<text transform="translate(119,396)" font-size="187" style="fill:#7f7f7f">ФИЛЬМ</text>
+<text transform="translate(378,237)" font-size="112" style="fill:#7f7f7f">Русский</text>
+<text transform="translate(93,327) rotate(-90)" font-size="111" style="fill:#7f7f7f">анонс</text>
+<text transform="translate(93,244)" font-size="84" style="fill:#7f7f7f">выхода</text>
+<text transform="translate(4,408)" font-size="68" style="fill:#7f7f7f">дата</text>
+<text transform="translate(123,186)" font-size="56" style="fill:#7f7f7f">сериал</text>
+<text transform="translate(755,156) rotate(-90)" font-size="56" style="fill:#7f7f7f">детей</text>
+<text transform="translate(223,31)" font-size="54" style="fill:#7f7f7f">сезон</text>
+<text transform="translate(430,29)" font-size="39" style="fill:#7f7f7f">Мультики</text>
+<text transform="translate(561,307)" font-size="38" style="fill:#7f7f7f">Буба</text>
+<text transform="translate(4,19)" font-size="25" style="fill:#7f7f7f">Мультфильм</text>
+<text transform="translate(575,417)" font-size="24" style="fill:#7f7f7f">НОВИНКА</text>
+<text transform="translate(554,263)" font-size="24" style="fill:#7f7f7f">Лучшие</text>
+<text transform="translate(2,367)" font-size="23" style="fill:#7f7f7f">КОТОРЫЕ</text>
+<text transform="translate(251,413)" font-size="21" style="fill:#7f7f7f">Сборник</text>
+<text transform="translate(457,171)" font-size="21" style="fill:#7f7f7f">МЕЛОДРАМА</text>
+<text transform="translate(692,414)" font-size="21" style="fill:#1f77b4">трейлер</text>
+<text transform="translate(212,392)" font-size="21" style="fill:#7f7f7f">Век</text>
+<text transform="translate(605,27)" font-size="20" style="fill:#1f77b4">дорама</text>
+<text transform="translate(445,413)" font-size="20" style="fill:#7f7f7f">ПОДРЯД</text>
+<text transform="translate(649,258)" font-size="20" style="fill:#7f7f7f">Великолепный</text>
+<text transform="translate(492,57)" font-size="20" style="fill:#7f7f7f">год</text>
+<text transform="translate(93,260)" font-size="20" style="fill:#1f77b4">озвучка</text>
+<text transform="translate(476,381) rotate(-90)" font-size="19" style="fill:#d62728">ИСТОРИЯ</text>
+<text transform="translate(39,340)" font-size="19" style="fill:#1f77b4">ТАЙНА</text>
+<text transform="translate(369,412)" font-size="19" style="fill:#7f7f7f">Эфир</text>
+<text transform="translate(615,173)" font-size="19" style="fill:#1f77b4">КОМЕДИЯ</text>
+<text transform="translate(387,255)" font-size="19" style="fill:#1f77b4">Самые</text>
+<text transform="translate(155,410)" font-size="19" style="fill:#7f7f7f">Премьера</text>
+<text transform="translate(130,88)" font-size="19" style="fill:#7f7f7f">отрывок</text>
+<text transform="translate(17,208) rotate(-90)" font-size="19" style="fill:#7f7f7f">МИР</text>
+<text transform="translate(126,33)" font-size="19" style="fill:#d62728">БОЕВИК</text>
+<text transform="translate(96,290)" font-size="19" style="fill:#d62728">LIVE</text>
+<text transform="translate(309,329) rotate(-90)" font-size="19" style="fill:#d62728">Смотрим</text>
+<text transform="translate(362,17)" font-size="19" style="fill:#d62728">прямом</text>
+<text transform="translate(494,254)" font-size="19" style="fill:#7f7f7f">Timmy</text>
+<text transform="translate(553,370)" font-size="19" style="fill:#7f7f7f">КИНО</text>
+<text transform="translate(154,99)" font-size="19" style="fill:#7f7f7f">игра</text>
+<text transform="translate(12,152) rotate(-90)" font-size="19" style="fill:#7f7f7f">приключения</text>
+<text transform="translate(762,58)" font-size="19" style="fill:#d62728">дом</text>
+<text transform="translate(199,263)" font-size="19" style="fill:#1f77b4">Первый</text>
+<text transform="translate(19,308) rotate(-90)" font-size="19" style="fill:#7f7f7f">ДЕТЕКТИВ</text>
+<text transform="translate(339,191) rotate(-90)" font-size="19" style="fill:#7f7f7f">СОБЫТИЯХ</text>
+<text transform="translate(405,361) rotate(-90)" font-size="19" style="fill:#1f77b4">ВОЕННЫЙ</text>
+<text transform="translate(31,168) rotate(-90)" font-size="19" style="fill:#7f7f7f">РЕАЛЬНЫХ</text>
+<text transform="translate(371,109)" font-size="19" style="fill:#d62728">День</text>
+<text transform="translate(455,374) rotate(-90)" font-size="19" style="fill:#d62728">Весёлые</text>
+</svg>

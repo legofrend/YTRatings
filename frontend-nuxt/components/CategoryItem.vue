@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * Category header bar — same layout language as ChannelItem,
- * shifted left for tree hierarchy vs channel rows.
+ * without rank column; stays within page width on narrow screens.
  */
 import StatBlock from './StatBlock.vue'
 
@@ -19,23 +19,14 @@ defineEmits<{
 </script>
 
 <template>
-  <div class="relative">
+  <div class="relative w-full min-w-0">
     <div
-      class="flex items-center bg-white text-black shadow-md w-full min-w-fit my-2 rounded-lg p-1 space-x-1 md:space-x-4"
+      class="flex items-start bg-white text-black shadow-md w-full min-w-0 my-2 rounded-lg p-1 gap-1 md:gap-4"
     >
-      <!-- spacer ≈ channel rank column (no place in category sum) -->
-      <div class="flex flex-col items-center w-5 md:w-8 shrink-0" aria-hidden="true" />
-
-      <!-- spacer ≈ channel logo -->
-      <div
-        class="h-10 w-10 md:h-16 md:w-16 shrink-0 rounded-sm border border-dashed border-gray-300 bg-gray-50"
-        aria-hidden="true"
-      />
-
-      <div class="flex justify-between flex-col md:flex-row w-full min-w-0">
-        <div>
-          <div class="flex items-center relative" :title="description || undefined">
-            <div class="relative">
+      <div class="flex justify-between flex-col md:flex-row w-full min-w-0 gap-2">
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center relative min-w-0" :title="description || undefined">
+            <div class="relative shrink-0">
               <div
                 :class="expanded ? 'rotate-90' : 'rotate-0'"
                 class="bg-gray-50 p-1 select-none"
@@ -56,21 +47,21 @@ defineEmits<{
                 Нажмите, чтобы посмотреть смыслы месяца, топ видео и динамику категории
               </div>
             </div>
-            <span class="text-base md:text-lg font-semibold ml-1">
+            <span class="text-xl md:text-2xl font-bold ml-1 leading-tight break-words">
               {{ title }}
             </span>
           </div>
         </div>
 
-        <div class="min-w-fit">
-          <StatBlock class="text-sm" :stat="stat" />
+        <div class="min-w-0 w-full md:w-auto md:max-w-full overflow-x-auto">
+          <StatBlock wide class="text-sm" :stat="stat" />
         </div>
       </div>
     </div>
 
     <div
       v-if="expanded"
-      class="text-xs w-auto p-2 ml-5 md:ml-32 -mt-4 shadow-lg bg-gray-50 rounded-lg text-black space-y-3"
+      class="text-xs w-full min-w-0 p-2 -mt-4 shadow-lg bg-gray-50 rounded-lg text-black space-y-3"
     >
       <slot />
     </div>

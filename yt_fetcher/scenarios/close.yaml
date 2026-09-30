@@ -1,12 +1,13 @@
 # Month-close pipeline. Loaded by `python -m app.main auto` (priority over harvest).
 # State (step done/pending) lives in PG table pipeline_run — not in this file.
 #
-# when: start on days 1..day_of_month_lte (Europe/Moscow).
-# If a run for this period is already unfinished, auto continues even after the window.
+# when: only days 1..day_of_month_lte (Europe/Moscow). After that auto skips close
+# even if pipeline_run has pending holes — finish those via manual CLI / auto --force.
 # period: previous_month → on Oct 1 close September.
 #
-# After close finishes (or is skipped), auto runs inline harvest
-# (unless last day of month after 08:00 MSK).
+# Priority: finish category 1 end-to-end before other cats burn quota.
+# Channel-stat is cheap → all cats first. Final channel-report once at the end.
+# `videos` already chains detail + shorts-sync + apply-is-short.
 
 id: close
 
@@ -17,58 +18,35 @@ when:
 period: previous_month
 
 steps:
-  # 1. Channel totals for active channels missing this period's row
+  # --- cheap: channel totals for every active channel missing this period ---
   - id: channel_stat
     cmd: channel-stat
 
-  # 2. Video stats already in DB without a row for this period
-  - id: video_stat_existing
-    cmd: video-stat
-
-  # 3. New uploads for top channels (priority <= 100), oldest fetch first
-  - id: videos_top
+  # --- category 1 first (any priority) ---
+  - id: videos_cat1
     cmd: videos
-    priority_lte: 100
-    skip_detail: true
-    skip_shorts: true
+    cats: [1]
+    priority_lte: null
 
-  - id: video_stat_top
+  - id: video_stat_cat1
     cmd: video-stat
+    cats: [1]
 
-  - id: detail_top
-    cmd: video-detail
+  # --- other categories ---
+  # existing videos without this period's row (before spending quota on fetch)
+  - id: video_stat_rest_existing
+    cmd: video-stat
+    cats_exclude: [1]
 
-  - id: shorts_top
-    cmd: shorts-sync
-    priority_lte: 100
-
-  - id: is_short_top
-    cmd: apply-is-short
-
-  # 4. Partial report after top-100 path
-  - id: report_top
-    cmd: channel-report
-
-  # 5. Long tail (priority > 100 or NULL)
   - id: videos_rest
     cmd: videos
-    priority_gt: 100
-    skip_detail: true
-    skip_shorts: true
+    cats_exclude: [1]
+    priority_lte: null
 
-  - id: detail_rest
-    cmd: video-detail
-
-  - id: shorts_rest
-    cmd: shorts-sync
-    priority_gt: 100
-
-  - id: is_short_rest
-    cmd: apply-is-short
-
-  - id: video_stat_rest
+  - id: video_stat_rest_new
     cmd: video-stat
+    cats_exclude: [1]
 
-  # 6. Final report after all channels
+  # --- denorm + ranks for the whole period ---
   - id: report_final
     cmd: channel-report

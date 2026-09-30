@@ -916,7 +916,7 @@ class VideoStatDAO(BaseDAO):
         report_period: date | Period,
         limit: int = 5,
     ) -> list[dict]:
-        """Top new videos across a category for period (by score = views, shorts/10)."""
+        """Top new long-form videos across a category for period (excludes shorts)."""
         if isinstance(report_period, Period):
             report_period = date(report_period.year, report_period.month, 1)
 
@@ -946,11 +946,7 @@ class VideoStatDAO(BaseDAO):
                         vs.view_count,
                         vs.like_count,
                         vs.comment_count,
-                        CASE
-                            WHEN vs.is_short
-                            THEN COALESCE(vs.period_view_count, 0) / 10.0
-                            ELSE COALESCE(vs.period_view_count, 0)
-                        END AS score
+                        COALESCE(vs.period_view_count, 0) AS score
                     FROM video_stat AS vs
                     JOIN video AS v ON v.video_id = vs.video_id
                     JOIN channel AS ch ON ch.channel_id = vs.channel_id
@@ -959,9 +955,8 @@ class VideoStatDAO(BaseDAO):
                       AND vs.report_period = :report_period
                       AND vs.is_new IS TRUE
                       AND COALESCE(v.status, 1) > 0
-                    ORDER BY
-                        score DESC,
-                        vs.is_short ASC NULLS FIRST
+                      AND COALESCE(vs.is_short, v.is_short, false) = false
+                    ORDER BY score DESC
                     LIMIT :limit
                     """
                 ),

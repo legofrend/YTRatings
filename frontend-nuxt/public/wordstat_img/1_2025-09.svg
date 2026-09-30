@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="420">
+<style>text{font-family:'Arial';font-weight:normal;font-style:normal;}</style>
+<rect width="100%" height="100%" style="fill:white"></rect>
+<text transform="translate(46,227)" font-size="219" style="fill:#7f7f7f">Путин</text>
+<text transform="translate(261,380)" font-size="182" style="fill:#7f7f7f">Трамп</text>
+<text transform="translate(320,87)" font-size="120" style="fill:#d62728">Встреча</text>
+<text transform="translate(2,365)" font-size="92" style="fill:#d62728">Аляске</text>
+<text transform="translate(63,67)" font-size="88" style="fill:#7f7f7f">войны</text>
+<text transform="translate(549,271)" font-size="61" style="fill:#7f7f7f">Украине</text>
+<text transform="translate(19,277)" font-size="56" style="fill:#7f7f7f">Удар</text>
+<text transform="translate(1,416)" font-size="56" style="fill:#1f77b4">Польше</text>
+<text transform="translate(370,270)" font-size="56" style="fill:#1f77b4">дроны</text>
+<text transform="translate(544,410)" font-size="42" style="fill:#d62728">Переговоры</text>
+<text transform="translate(686,202)" font-size="40" style="fill:#1f77b4">НАТО</text>
+<text transform="translate(656,120)" font-size="40" style="fill:#7f7f7f">Москве</text>
+<text transform="translate(642,155)" font-size="39" style="fill:#7f7f7f">Кремль</text>
+<text transform="translate(152,305)" font-size="39" style="fill:#7f7f7f">США</text>
+<text transform="translate(197,98)" font-size="38" style="fill:#1f77b4">Европа</text>
+<text transform="translate(92,111)" font-size="38" style="fill:#d62728">мир</text>
+<text transform="translate(675,236)" font-size="37" style="fill:#1f77b4">Китай</text>
+<text transform="translate(36,211) rotate(-90)" font-size="37" style="fill:#1f77b4">Пугачевой</text>
+<text transform="translate(406,402)" font-size="37" style="fill:#7f7f7f">против</text>
+<text transform="translate(208,405)" font-size="32" style="fill:#7f7f7f">Российские</text>
+<text transform="translate(327,105)" font-size="31" style="fill:#7f7f7f">выпуск</text>
+<text transform="translate(534,107)" font-size="26" style="fill:#d62728">Демченко</text>
+<text transform="translate(520,21)" font-size="26" style="fill:#1f77b4">Атака</text>
+<text transform="translate(55,246)" font-size="26" style="fill:#7f7f7f">Зеленский</text>
+<text transform="translate(658,21)" font-size="26" style="fill:#d62728">готовит</text>
+<text transform="translate(460,108)" font-size="26" style="fill:#7f7f7f">ВСУ</text>
+<text transform="translate(69,309)" font-size="26" style="fill:#d62728">эфир</text>
+</svg>

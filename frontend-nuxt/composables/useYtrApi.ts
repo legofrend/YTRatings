@@ -19,22 +19,33 @@ export function useYtrApi() {
       api<{ category_id: number; periods: string[] }>('periods', {
         query: { category_id: categoryId },
       }),
-    channels: (categoryId: number, period: string, limit = 100) =>
-      api<{
+    channels: (
+      categoryId: number,
+      period: string,
+      opts: number | { limit?: number; offset?: number; videos?: boolean } = 100
+    ) => {
+      const limit = typeof opts === 'number' ? opts : (opts.limit ?? 100)
+      const offset = typeof opts === 'number' ? 0 : (opts.offset ?? 0)
+      const videos = typeof opts === 'number' ? true : (opts.videos ?? offset === 0)
+      return api<{
         category_id: number
         period: string
         limit: number
+        offset: number
+        total: number
         channels: Record<string, any>[]
       }>('channels', {
         query: {
           category_id: categoryId,
           period,
           limit,
-          // SSG / archive: top-5 videos for top-10 channels (instant expand)
-          videos_limit: 5,
-          videos_for: 10,
+          offset,
+          ...(videos
+            ? { videos_limit: 5, videos_for: 10 }
+            : { videos_limit: 0, videos_for: 0 }),
         },
-      }),
+      })
+    },
     videos: (channelId: string, period: string, limit = 10) =>
       api<{ videos: Record<string, any>[] }>('videos', {
         query: { channel_id: channelId, period, limit },

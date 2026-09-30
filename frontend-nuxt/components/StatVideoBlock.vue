@@ -24,20 +24,19 @@ const scoreTitle = computed(() => {
 })
 
 
-const likeShare = computed(() => {
-    var val = Math.round((props.stat.like_count / props.stat.view_count * 100 * 10)) / 10
-    return val.toFixed(1);
-})
+/** "x.x%" or "-" when denominator is missing/zero. */
+function sharePct(num, den, digits = 1) {
+    const n = Number(num)
+    const d = Number(den)
+    if (!Number.isFinite(n) || !Number.isFinite(d) || d <= 0) return '-'
+    return (n / d * 100).toFixed(digits) + '%'
+}
 
-const clickbaitShare = computed(() => {
-    var val = Math.round((props.stat.video_clickbaits / props.stat.videos * 100))
-    return val;
-})
+const likeShare = computed(() => sharePct(props.stat.like_count, props.stat.view_count))
 
-const commentShare = computed(() => {
-    var val = Math.round((props.stat.comment_count / props.stat.view_count * 100 * 10)) / 10
-    return val.toFixed(1);
-})
+const clickbaitShare = computed(() => sharePct(props.stat.video_clickbaits, props.stat.videos, 0))
+
+const commentShare = computed(() => sharePct(props.stat.comment_count, props.stat.view_count))
 
 
 
@@ -70,11 +69,11 @@ function formatTime(seconds, full = false) {
         </div>
         <div class="flex px-1  items-center">
             <img src="/img/iconLike.svg" class="h-3  mr-1" alt="">
-            <div>{{ likeShare + '%' }}</div>
+            <div>{{ likeShare }}</div>
         </div>
         <div class="flex px-1 items-center">
             <img src="/img/iconComment.svg" class="h-3 mr-1" alt="">
-            <div>{{ commentShare + '%' }}</div>
+            <div>{{ commentShare }}</div>
         </div>
         <div class="flex px-1 items-center bg-black text-white rounded-md">
             <div>{{ formatTime(stat.duration, true) }}</div>

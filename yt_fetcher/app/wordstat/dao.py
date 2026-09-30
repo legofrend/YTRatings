@@ -265,10 +265,11 @@ class WordstatDAO:
         """Assemble leaving/core/new for API.
 
         For period M:
-          leaving — type −1/2 from M−1 (words that left after previous month)
+          leaving — type −1/2 from M−1 (dropped out of top after previous month)
           core    — type 0 from M
-          new     — type 1 from M
+          new     — type 1/2 from M (entered top this month; 2 = one-month spike)
 
+        So a type=2 word is blue on its month and red on the next.
         Empty lists if no rows.
         """
         period_d = _as_date(period)
@@ -321,11 +322,11 @@ class WordstatDAO:
         new: list[dict] = []
         for r in cur:
             t = r["type"]
-            if t == TYPE_NEW:
+            if t in (TYPE_NEW, TYPE_BOTH):
                 new.append(item(r))
             elif t == TYPE_CORE or t is None:
                 core.append(item(r))
-            # type −1 / 2 of current month: shown as leaving when viewing M+1
+            # type −1 of current month: shown as leaving when viewing M+1
 
         return {
             "category_id": category_id,

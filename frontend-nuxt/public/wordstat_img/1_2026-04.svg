@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="420">
+<style>text{font-family:'Arial';font-weight:normal;font-style:normal;}</style>
+<rect width="100%" height="100%" style="fill:white"></rect>
+<text transform="translate(131,293)" font-size="238" style="fill:#7f7f7f">Путин</text>
+<text transform="translate(284,128)" font-size="174" style="fill:#7f7f7f">Трамп</text>
+<text transform="translate(419,409)" font-size="144" style="fill:#1f77b4">Боня</text>
+<text transform="translate(102,395) rotate(-90)" font-size="138" style="fill:#7f7f7f">войну</text>
+<text transform="translate(175,417)" font-size="102" style="fill:#7f7f7f">США</text>
+<text transform="translate(130,92)" font-size="56" style="fill:#7f7f7f">Кремль</text>
+<text transform="translate(122,39)" font-size="53" style="fill:#d62728">нефть</text>
+<text transform="translate(226,340) rotate(-90)" font-size="53" style="fill:#1f77b4">Туапсе</text>
+<text transform="translate(530,320)" font-size="51" style="fill:#7f7f7f">удар</text>
+<text transform="translate(582,158)" font-size="42" style="fill:#7f7f7f">Украина</text>
+<text transform="translate(442,31)" font-size="41" style="fill:#7f7f7f">Москве</text>
+<text transform="translate(138,374) rotate(-90)" font-size="41" style="fill:#d62728">Израиль</text>
+<text transform="translate(427,158)" font-size="38" style="fill:#7f7f7f">против</text>
+<text transform="translate(667,28)" font-size="36" style="fill:#1f77b4">Орбана</text>
+<text transform="translate(1,410)" font-size="35" style="fill:#1f77b4">перемирие</text>
+<text transform="translate(287,156)" font-size="34" style="fill:#d62728">Атака</text>
+<text transform="translate(685,322)" font-size="34" style="fill:#d62728">выпуск</text>
+<text transform="translate(312,313) rotate(-90)" font-size="34" style="fill:#d62728">готовят</text>
+<text transform="translate(172,120)" font-size="34" style="fill:#d62728">Началось</text>
+<text transform="translate(388,299)" font-size="34" style="fill:#7f7f7f">ВСУ</text>
+<text transform="translate(213,60)" font-size="34" style="fill:#1f77b4">власти</text>
+<text transform="translate(667,292) rotate(-90)" font-size="34" style="fill:#d62728">дронов</text>
+<text transform="translate(585,29)" font-size="33" style="fill:#1f77b4">ФСБ</text>
+<text transform="translate(250,289) rotate(-90)" font-size="33" style="fill:#1f77b4">Венгрии</text>
+</svg>

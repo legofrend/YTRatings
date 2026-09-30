@@ -1049,15 +1049,43 @@ class ChannelStatDAO(BaseDAO):
             return rows
 
     @classmethod
+    async def count_ranked_channels(
+        cls,
+        *,
+        category_id: int,
+        report_period: date | Period,
+    ) -> int:
+        if isinstance(report_period, Period):
+            report_period = date(report_period.year, report_period.month, 1)
+
+        async with async_session_maker() as session:
+            result = await session.execute(
+                select(func.count())
+                .select_from(ChannelStat)
+                .join(Channel, Channel.channel_id == ChannelStat.channel_id)
+                .where(
+                    Channel.category_id == category_id,
+                    Channel.status == ChannelStatus.ACTIVE,
+                    ChannelStat.report_period == report_period,
+                    ChannelStat.pv_score_rank.is_not(None),
+                )
+            )
+            return int(result.scalar_one() or 0)
+
+    @classmethod
     async def top_channels(
         cls,
         *,
         category_id: int,
         report_period: date | Period,
         limit: int = 20,
+        offset: int = 0,
     ) -> list[dict]:
         if isinstance(report_period, Period):
             report_period = date(report_period.year, report_period.month, 1)
+
+        limit = max(1, min(int(limit), 100))
+        offset = max(0, int(offset))
 
         async with async_session_maker() as session:
             result = await session.execute(
@@ -1097,6 +1125,7 @@ class ChannelStatDAO(BaseDAO):
                     ChannelStat.pv_score_rank.is_not(None),
                 )
                 .order_by(ChannelStat.pv_score_rank.asc())
+                .offset(offset)
                 .limit(limit)
             )
             rows = []

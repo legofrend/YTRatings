@@ -66,7 +66,8 @@ async def list_channels(
     period: str | None = Query(
         None, description="Report period YYYY-MM-DD; default = latest available"
     ),
-    limit: int = Query(20, ge=1, le=100, description="Top N channels"),
+    limit: int = Query(20, ge=1, le=100, description="Page size / top N"),
+    offset: int = Query(0, ge=0, description="Skip N ranked channels (pagination)"),
     videos_limit: int = Query(
         0,
         ge=0,
@@ -80,7 +81,7 @@ async def list_channels(
         description="How many top channels get embedded videos (when videos_limit>0)",
     ),
 ):
-    """Top channels for category+period from channel_stat JOIN channel."""
+    """Ranked channels for category+period (offset/limit). Includes total count."""
     if period:
         report_period = Period.parse(period)
     else:
@@ -89,15 +90,20 @@ async def list_channels(
             raise HTTPException(status_code=404, detail="No data for category")
         report_period = Period.parse(str(latest))
 
+    total = await ChannelStatDAO.count_ranked_channels(
+        category_id=category_id,
+        report_period=report_period,
+    )
     channels = await ChannelStatDAO.top_channels(
         category_id=category_id,
         report_period=report_period,
         limit=limit,
+        offset=offset,
     )
-    if not channels:
+    if total == 0 or (not channels and offset == 0):
         raise HTTPException(status_code=404, detail="No channels for category/period")
 
-    if videos_limit > 0 and videos_for > 0:
+    if videos_limit > 0 and videos_for > 0 and channels:
         ids = [c["channel_id"] for c in channels[:videos_for] if c.get("channel_id")]
         by_ch = await VideoStatDAO.top_for_channels(
             channel_ids=ids,
@@ -113,6 +119,8 @@ async def list_channels(
         "category_id": category_id,
         "period": report_period.strf(),
         "limit": limit,
+        "offset": offset,
+        "total": total,
         "videos_limit": videos_limit,
         "videos_for": videos_for if videos_limit > 0 else 0,
         "channels": channels,
@@ -361,7 +369,7 @@ async def wordstat(
 ):
     """Title topics for category×period.
 
-    leaving = type −1/2 of previous month; core/new = type 0/1 of requested month.
+    leaving = type −1/2 of previous month; core = type 0, new = type 1/2 of requested month.
     Empty lists (HTTP 200) when no wordstat rows.
     """
     from app.wordstat import WordstatDAO

@@ -3,7 +3,10 @@ import { computed } from 'vue';
 import ValueChange from './UI/ValueChange.vue';
 import dataBlock from './UI/dataBlock.vue';
 
-const props = defineProps(['stat'])
+const props = defineProps({
+  stat: { type: Object, required: true },
+  wide: { type: Boolean, default: false },
+})
 // console.log(props.stat)
 
 const ValDisplay = (value) => {
@@ -21,26 +24,26 @@ const ValDisplay = (value) => {
 const scoreTitle = computed(() => {
     var val = 'Индекс: ' + ValDisplay(props.stat.score) + ' = ' + ValDisplay(props.stat.view_count_new_video) + ' + '
         + ValDisplay(props.stat.view_count_new_short) + ' /10 + ' + ValDisplay(props.stat.view_count_old_video) + ' + ' + ValDisplay(props.stat.view_count_old_short) + ' /10' + '\n'
-        + 'в среднем на 1 видео: ' + ValDisplay(Math.round(props.stat.view_count_new_video / props.stat.videos))
+        + 'в среднем на 1 видео: ' + (props.stat.videos > 0
+            ? ValDisplay(Math.round(props.stat.view_count_new_video / props.stat.videos))
+            : '-')
 
     return val;
 })
 
+/** "x.x%" or "-" when denominator is missing/zero. */
+function sharePct(num, den, digits = 1) {
+    const n = Number(num)
+    const d = Number(den)
+    if (!Number.isFinite(n) || !Number.isFinite(d) || d <= 0) return '-'
+    return (n / d * 100).toFixed(digits) + '%'
+}
 
-const likeShare = computed(() => {
-    var val = Math.round((props.stat.like_count / props.stat.view_count * 100 * 10)) / 10
-    return val.toFixed(1);
-})
+const likeShare = computed(() => sharePct(props.stat.like_count, props.stat.view_count))
 
-const clickbaitShare = computed(() => {
-    var val = Math.round((props.stat.video_clickbaits / props.stat.videos * 100))
-    return val;
-})
+const clickbaitShare = computed(() => sharePct(props.stat.video_clickbaits, props.stat.videos, 0))
 
-const commentShare = computed(() => {
-    var val = Math.round((props.stat.comment_count / props.stat.view_count * 100 * 10)) / 10
-    return val.toFixed(1);
-})
+const commentShare = computed(() => sharePct(props.stat.comment_count, props.stat.view_count))
 
 
 
@@ -65,23 +68,23 @@ function formatTime(seconds, full = false) {
 </script>
 
 <template>
-    <div class="flex flex-auto space-x-1 md:space-x-2 items-baseline text-sm">
-        <data-block type="score" :value="ValDisplay(stat.score)" :value-change="stat.score_change"
+    <div class="flex flex-auto flex-wrap gap-1 md:gap-2 items-baseline text-sm">
+        <data-block :wide="wide" type="score" :value="ValDisplay(stat.score)" :value-change="stat.score_change"
             :title="scoreTitle"></data-block>
-        <data-block type="subscribers" :value="ValDisplay(stat.subscriber_count)"
+        <data-block :wide="wide" type="subscribers" :value="ValDisplay(stat.subscriber_count)"
             :value-change="stat.subscriber_count_change" title="Подписчики"></data-block>
-        <data-block type="likes" :value="likeShare + '%'" title="Отношение Лайки/Просмотры"></data-block>
-        <data-block type="comments" :value="commentShare + '%'"
+        <data-block :wide="wide" type="likes" :value="likeShare" title="Отношение Лайки/Просмотры"></data-block>
+        <data-block :wide="wide" type="comments" :value="commentShare"
             title="Отношение количества комментариев к просмотрам"></data-block>
 
-        <data-block type="videos" :value="stat.videos" title="Количество новых видео за месяц"></data-block>
-        <data-block type="shorts" :value="stat.shorts" title="Количество новых клипов за месяц"></data-block>
-        <data-block class="hidden md:flex" type="time" :value="formatTime(stat.duration)"
+        <data-block :wide="wide" type="videos" :value="stat.videos" title="Количество новых видео за месяц"></data-block>
+        <data-block :wide="wide" type="shorts" :value="stat.shorts" title="Количество новых клипов за месяц"></data-block>
+        <data-block :wide="wide" class="hidden md:flex" type="time" :value="formatTime(stat.duration)"
             title="Длительность"></data-block>
 
         <!-- 
         <div title="Комментарии" v-if="stat.comment_count">🗨{{ ValDisplay(stat.comment_count) }}M</div> 
-        <data-block type="clickbaits" :value="clickbaitShare + '%'" title="Доля кликбейтных названий"></data-block>
+        <data-block type="clickbaits" :value="clickbaitShare" title="Доля кликбейтных названий"></data-block>
          
         -->
 

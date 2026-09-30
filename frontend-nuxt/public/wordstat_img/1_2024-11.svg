@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="420">
+<style>text{font-family:'Arial';font-weight:normal;font-style:normal;}</style>
+<rect width="100%" height="100%" style="fill:white"></rect>
+<text transform="translate(102,325)" font-size="195" style="fill:#7f7f7f">Путин</text>
+<text transform="translate(52,137)" font-size="185" style="fill:#1f77b4">Трампа</text>
+<text transform="translate(334,417)" font-size="130" style="fill:#7f7f7f">войны</text>
+<text transform="translate(440,203)" font-size="89" style="fill:#7f7f7f">Украине</text>
+<text transform="translate(60,385)" font-size="85" style="fill:#7f7f7f">удар</text>
+<text transform="translate(76,335) rotate(-90)" font-size="79" style="fill:#d62728">Израиль</text>
+<text transform="translate(229,189)" font-size="51" style="fill:#1f77b4">Орешник</text>
+<text transform="translate(652,270)" font-size="48" style="fill:#d62728">ВСУ</text>
+<text transform="translate(635,320)" font-size="47" style="fill:#d62728">КНДР</text>
+<text transform="translate(349,30)" font-size="40" style="fill:#7f7f7f">Курской</text>
+<text transform="translate(196,320) rotate(-90)" font-size="40" style="fill:#1f77b4">рубля</text>
+<text transform="translate(562,33)" font-size="40" style="fill:#d62728">Зеленского</text>
+<text transform="translate(164,23)" font-size="40" style="fill:#1f77b4">ракетами</text>
+<text transform="translate(788,412) rotate(-90)" font-size="39" style="fill:#7f7f7f">Свободы</text>
+<text transform="translate(290,221)" font-size="39" style="fill:#d62728">БРИКС</text>
+<text transform="translate(146,180) rotate(-90)" font-size="39" style="fill:#1f77b4">ядерной</text>
+<text transform="translate(691,79)" font-size="39" style="fill:#d62728">Кац</text>
+<text transform="translate(222,411)" font-size="35" style="fill:#d62728">Грузии</text>
+<text transform="translate(633,226)" font-size="31" style="fill:#1f77b4">российской</text>
+<text transform="translate(27,219) rotate(-90)" font-size="31" style="fill:#d62728">Навального</text>
+<text transform="translate(105,327) rotate(-90)" font-size="31" style="fill:#d62728">План</text>
+<text transform="translate(715,147)" font-size="31" style="fill:#7f7f7f">эфир</text>
+<text transform="translate(689,114)" font-size="30" style="fill:#1f77b4">Время</text>
+<text transform="translate(160,339) rotate(-90)" font-size="30" style="fill:#1f77b4">области</text>
+<text transform="translate(364,346)" font-size="29" style="fill:#1f77b4">ATACMS</text>
+</svg>

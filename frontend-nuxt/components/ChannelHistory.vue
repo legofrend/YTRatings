@@ -4,11 +4,13 @@ import { computed } from 'vue';
 const props = defineProps({
   points: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false },
-  error: { type: String, default: null },
+  error: { type: [String, Boolean], default: null },
   /** Category aggregate: bars only + MoM % label above score (no subs / rank / line). */
   scoreOnly: { type: Boolean, default: false },
   title: { type: String, default: 'Динамика (12 мес.)' },
 });
+
+defineEmits(['retry']);
 
 const W = 720;
 const H = 236;
@@ -278,7 +280,13 @@ const chart = computed(() => {
       />
       Загрузка динамики…
     </div>
-    <div v-else-if="error" class="p-2 text-red-600">{{ error }}</div>
+    <div v-else-if="error">
+      <UIFetchError
+        compact
+        message="Не удалось загрузить динамику"
+        @retry="$emit('retry')"
+      />
+    </div>
     <div v-else-if="!chart" class="text-xs text-gray-400 py-4">Нет данных</div>
     <svg
       v-else

@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="420">
+<style>text{font-family:'Arial';font-weight:normal;font-style:normal;}</style>
+<rect width="100%" height="100%" style="fill:white"></rect>
+<text transform="translate(212,206)" font-size="265" style="fill:#7f7f7f">ИИ</text>
+<text transform="translate(17,356)" font-size="217" style="fill:#7f7f7f">агентов</text>
+<text transform="translate(326,417)" font-size="84" style="fill:#7f7f7f">Claude</text>
+<text transform="translate(45,134)" font-size="81" style="fill:#7f7f7f">AI</text>
+<text transform="translate(7,417)" font-size="75" style="fill:#d62728">HERMES</text>
+<text transform="translate(575,166)" font-size="62" style="fill:#1f77b4">создать</text>
+<text transform="translate(25,208)" font-size="59" style="fill:#d62728">AGENT</text>
+<text transform="translate(607,81)" font-size="59" style="fill:#d62728">Codex</text>
+<text transform="translate(59,34)" font-size="59" style="fill:#d62728">задач</text>
+<text transform="translate(656,130)" font-size="59" style="fill:#1f77b4">Code</text>
+<text transform="translate(572,239)" font-size="50" style="fill:#7f7f7f">Seedance</text>
+<text transform="translate(591,395)" font-size="38" style="fill:#7f7f7f">нейросетей</text>
+<text transform="translate(700,29)" font-size="38" style="fill:#d62728">Omni</text>
+<text transform="translate(147,229)" font-size="38" style="fill:#1f77b4">которые</text>
+<text transform="translate(12,154)" font-size="35" style="fill:#7f7f7f">новинки</text>
+<text transform="translate(457,237)" font-size="35" style="fill:#7f7f7f">вместе</text>
+<text transform="translate(608,200)" font-size="35" style="fill:#7f7f7f">технологий</text>
+<text transform="translate(410,259) rotate(-90)" font-size="35" style="fill:#7f7f7f">Еженедельный</text>
+<text transform="translate(126,126)" font-size="35" style="fill:#7f7f7f">Нейро</text>
+<text transform="translate(343,257) rotate(-90)" font-size="35" style="fill:#7f7f7f">ComfyUI</text>
+<text transform="translate(94,65)" font-size="35" style="fill:#7f7f7f">видео</text>
+<text transform="translate(6,226)" font-size="22" style="fill:#7f7f7f">Нейро-Стрим</text>
+<text transform="translate(146,337) rotate(-90)" font-size="22" style="fill:#7f7f7f">Смотрим</text>
+<text transform="translate(464,31)" font-size="22" style="fill:#7f7f7f">Стрим</text>
+<text transform="translate(672,412)" font-size="22" style="fill:#7f7f7f">генерируем</text>
+<text transform="translate(576,28)" font-size="22" style="fill:#d62728">команд</text>
+<text transform="translate(459,133) rotate(-90)" font-size="22" style="fill:#d62728">делегировал</text>
+<text transform="translate(469,189)" font-size="22" style="fill:#d62728">лучших</text>
+<text transform="translate(7,61)" font-size="22" style="fill:#d62728">Google</text>
+<text transform="translate(299,87) rotate(-90)" font-size="22" style="fill:#1f77b4">OpenAI</text>
+<text transform="translate(466,211)" font-size="22" style="fill:#1f77b4">полный</text>
+<text transform="translate(584,104)" font-size="22" style="fill:#1f77b4">минут</text>
+<text transform="translate(311,197) rotate(-90)" font-size="22" style="fill:#1f77b4">гайд</text>
+<text transform="translate(119,94)" font-size="20" style="fill:#7f7f7f">бесплатную</text>
+<text transform="translate(458,367)" font-size="20" style="fill:#d62728">делает</text>
+<text transform="translate(166,147)" font-size="20" style="fill:#d62728">ещё</text>
+<text transform="translate(509,13)" font-size="20" style="fill:#d62728">своего</text>
+<text transform="translate(651,368)" font-size="17" style="fill:#d62728">ПОДКЛЮЧАЕМ</text>
+<text transform="translate(16,106)" font-size="17" style="fill:#d62728">API</text>
+<text transform="translate(570,11)" font-size="17" style="fill:#d62728">генерировать</text>
+<text transform="translate(573,122)" font-size="17" style="fill:#d62728">помощью</text>
+<text transform="translate(9,78)" font-size="17" style="fill:#d62728">Gemini</text>
+<text transform="translate(718,44)" font-size="17" style="fill:#d62728">Antigravity</text>
+<text transform="translate(606,175)" font-size="17" style="fill:#d62728">модель</text>
+<text transform="translate(178,77)" font-size="17" style="fill:#d62728">Авито</text>
+<text transform="translate(649,48)" font-size="17" style="fill:#1f77b4">самом</text>
+<text transform="translate(174,338)" font-size="17" style="fill:#1f77b4">скилл</text>
+<text transform="translate(331,14)" font-size="17" style="fill:#1f77b4">обновления</text>
+<text transform="translate(146,162)" font-size="17" style="fill:#1f77b4">ИИ-агента</text>
+<text transform="translate(599,320)" font-size="15" style="fill:#1f77b4">Skill</text>
+<text transform="translate(594,417)" font-size="15" style="fill:#1f77b4">ChatGPT</text>
+<text transform="translate(490,152)" font-size="15" style="fill:#1f77b4">продукт</text>
+<text transform="translate(259,314)" font-size="15" style="fill:#1f77b4">презентации</text>
+<text transform="translate(255,9)" font-size="15" style="fill:#1f77b4">рекламу</text>
+<text transform="translate(528,316) rotate(-90)" font-size="15" style="fill:#1f77b4">первого</text>
+<text transform="translate(552,369)" font-size="15" style="fill:#1f77b4">ПОВТОРИТ</text>
+<text transform="translate(459,345) rotate(-90)" font-size="15" style="fill:#1f77b4">Секретный</text>
+<text transform="translate(470,63)" font-size="15" style="fill:#1f77b4">ВАШ</text>
+</svg>

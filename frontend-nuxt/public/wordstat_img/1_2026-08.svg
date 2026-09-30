@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="420">
+<style>text{font-family:'Arial';font-weight:normal;font-style:normal;}</style>
+<rect width="100%" height="100%" style="fill:white"></rect>
+<text transform="translate(27,339)" font-size="236" style="fill:#7f7f7f">Путин</text>
+<text transform="translate(170,144)" font-size="182" style="fill:#7f7f7f">Москве</text>
+<text transform="translate(542,401)" font-size="86" style="fill:#7f7f7f">Удар</text>
+<text transform="translate(327,210)" font-size="78" style="fill:#1f77b4">Яблоко</text>
+<text transform="translate(317,408)" font-size="76" style="fill:#7f7f7f">войны</text>
+<text transform="translate(2,399)" font-size="75" style="fill:#d62728">Крым</text>
+<text transform="translate(593,190)" font-size="53" style="fill:#7f7f7f">Украина</text>
+<text transform="translate(4,96)" font-size="50" style="fill:#7f7f7f">Кремль</text>
+<text transform="translate(463,43)" font-size="49" style="fill:#d62728">Зеленский</text>
+<text transform="translate(1,43)" font-size="29" style="fill:#7f7f7f">мобилизации</text>
+<text transform="translate(205,174)" font-size="29" style="fill:#1f77b4">выборов</text>
+<text transform="translate(88,137)" font-size="28" style="fill:#7f7f7f">ВСУ</text>
+<text transform="translate(271,352)" font-size="28" style="fill:#7f7f7f">Атака</text>
+<text transform="translate(700,225)" font-size="28" style="fill:#7f7f7f">Трамп</text>
+<text transform="translate(317,33)" font-size="28" style="fill:#7f7f7f">бензина</text>
+<text transform="translate(69,165)" font-size="27" style="fill:#7f7f7f">Wildberries</text>
+<text transform="translate(246,194)" font-size="25" style="fill:#7f7f7f">дронов</text>
+<text transform="translate(692,280)" font-size="25" style="fill:#d62728">горит</text>
+<text transform="translate(32,231) rotate(-90)" font-size="24" style="fill:#d62728">склады</text>
+<text transform="translate(85,321)" font-size="24" style="fill:#7f7f7f">НПЗ</text>
+<text transform="translate(683,312)" font-size="24" style="fill:#1f77b4">готовится</text>
+<text transform="translate(720,36)" font-size="24" style="fill:#1f77b4">выпуск</text>
+<text transform="translate(46,14)" font-size="24" style="fill:#7f7f7f">кризис</text>
+<text transform="translate(191,413)" font-size="24" style="fill:#7f7f7f">против</text>
+</svg>

@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="420">
+<style>text{font-family:'Arial';font-weight:normal;font-style:normal;}</style>
+<rect width="100%" height="100%" style="fill:white"></rect>
+<text transform="translate(16,350)" font-size="223" style="fill:#7f7f7f">Трамп</text>
+<text transform="translate(113,146)" font-size="202" style="fill:#7f7f7f">Путина</text>
+<text transform="translate(377,231)" font-size="117" style="fill:#7f7f7f">США</text>
+<text transform="translate(392,403)" font-size="74" style="fill:#7f7f7f">Украине</text>
+<text transform="translate(772,379) rotate(-90)" font-size="73" style="fill:#7f7f7f">войны</text>
+<text transform="translate(18,399)" font-size="62" style="fill:#7f7f7f">Удар</text>
+<text transform="translate(282,29)" font-size="52" style="fill:#7f7f7f">переговоров</text>
+<text transform="translate(1,177)" font-size="50" style="fill:#7f7f7f">перемирие</text>
+<text transform="translate(711,417) rotate(-90)" font-size="50" style="fill:#7f7f7f">Зеленского</text>
+<text transform="translate(26,105)" font-size="48" style="fill:#7f7f7f">мир</text>
+<text transform="translate(604,37)" font-size="46" style="fill:#d62728">ВСУ</text>
+<text transform="translate(211,389)" font-size="46" style="fill:#7f7f7f">Москве</text>
+<text transform="translate(202,224)" font-size="44" style="fill:#d62728">области</text>
+<text transform="translate(2,46)" font-size="33" style="fill:#d62728">Курской</text>
+<text transform="translate(4,143)" font-size="32" style="fill:#7f7f7f">против</text>
+<text transform="translate(173,411)" font-size="31" style="fill:#7f7f7f">выпуск</text>
+<text transform="translate(283,412)" font-size="30" style="fill:#7f7f7f">Кремль</text>
+<text transform="translate(5,19)" font-size="30" style="fill:#d62728">военных</text>
+<text transform="translate(118,363) rotate(-90)" font-size="29" style="fill:#1f77b4">российской</text>
+<text transform="translate(177,141) rotate(-90)" font-size="28" style="fill:#d62728">Свободы</text>
+<text transform="translate(694,31)" font-size="28" style="fill:#1f77b4">нефть</text>
+<text transform="translate(26,75)" font-size="27" style="fill:#1f77b4">готовит</text>
+<text transform="translate(720,406)" font-size="27" style="fill:#1f77b4">эфир</text>
+<text transform="translate(2,341)" font-size="27" style="fill:#1f77b4">Крым</text>
+</svg>

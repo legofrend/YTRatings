@@ -45,6 +45,29 @@ def _step_priority_kwargs(params: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _step_category_ids(
+    params: dict[str, Any],
+    all_category_ids: list[int],
+) -> list[int]:
+    """Per-step cats / cats_exclude over the auto-resolved active list."""
+    cats = params.get("cats")
+    exclude = params.get("cats_exclude")
+    if cats is not None:
+        if isinstance(cats, int):
+            ids = [cats]
+        else:
+            ids = [int(c) for c in cats]
+        allowed = set(all_category_ids)
+        return [i for i in ids if i in allowed] or ids
+    if exclude is not None:
+        if isinstance(exclude, int):
+            ex = {exclude}
+        else:
+            ex = {int(c) for c in exclude}
+        return [i for i in all_category_ids if i not in ex]
+    return list(all_category_ids)
+
+
 async def _dispatch_cmd(
     name: str,
     *,
@@ -66,35 +89,37 @@ async def _dispatch_cmd(
     )
 
     p = step.params
+    cats = _step_category_ids(p, category_ids)
     prio = _step_priority_kwargs(p)
+    # Explicit null priority_lte → all priorities; omit → default 100
     priority = prio["priority"] if "priority" in prio else 100
 
     if name == "channel-stat":
-        await cmd_channel_stat(period, category_ids, force=bool(p.get("force")))
+        await cmd_channel_stat(period, cats, force=bool(p.get("force")))
     elif name == "video-stat":
-        await cmd_video_stat(period, category_ids, force=bool(p.get("force")))
+        await cmd_video_stat(period, cats, force=bool(p.get("force")))
     elif name == "videos":
         return await cmd_videos(
             period,
-            category_ids,
+            cats,
             priority=priority,
             priority_gt=prio.get("priority_gt"),
             skip_shorts=bool(p.get("skip_shorts", False)),
             skip_detail=bool(p.get("skip_detail", False)),
         )
     elif name == "video-detail":
-        await cmd_video_detail(category_ids)
+        await cmd_video_detail(cats)
     elif name == "shorts-sync":
         return await cmd_shorts_sync(
             period,
-            category_ids,
+            cats,
             priority=priority,
             priority_gt=prio.get("priority_gt"),
             channel_id=None,
             only_missing=bool(p.get("only_missing", False)),
         )
     elif name == "apply-is-short":
-        await cmd_apply_is_short(category_ids=category_ids, channel_id=None)
+        await cmd_apply_is_short(category_ids=cats, channel_id=None)
     elif name == "backfill-denorm":
         await cmd_backfill_denorm(period, None)
     elif name == "backfill-channel-denorm":
@@ -138,7 +163,10 @@ async def _run_close_steps(
             )
             return "done"
 
-        logger.info(f"auto: === close / {step.id} cmds={step.cmds} ===")
+        logger.info(
+            f"auto: === close / {step.id} cmds={step.cmds} "
+            f"params={step.params} ==="
+        )
         await set_step_status(scenario.id, period, step.id, "running")
         try:
             stop: str | None = None
@@ -197,19 +225,24 @@ async def _run_close(
     in_window = in_calendar_window(scenario, now)
     incomplete = await has_incomplete(scenario.id, period)
 
-    if not in_window and not incomplete and not force:
+    # auto: only days 1..N. After that holes are manual CLI / --force.
+    if not in_window and not force:
         logger.info(
-            f"auto: skip close (outside window, no pending) "
-            f"period={period.strf('%p')}"
+            f"auto: skip close (outside day window"
+            f"{', unfinished left for manual' if incomplete else ''}) "
+            f"period={period.strf('%p')} when={scenario.when}"
         )
         return "skipped"
 
-    if force and not incomplete and not in_window:
-        logger.warning("auto: --force starting/continuing close outside window")
+    if force and not in_window:
+        logger.warning(
+            f"auto: --force close outside window "
+            f"period={period.strf('%p')} incomplete={incomplete}"
+        )
 
     logger.info(
         f"auto: close period={period.strf('%p')} "
-        f"in_window={in_window} incomplete={incomplete}"
+        f"in_window={in_window} incomplete={incomplete} force={force}"
     )
     return await _run_close_steps(scenario, period, category_ids)
 
@@ -270,11 +303,12 @@ async def run_auto(
     force: bool = False,
 ) -> None:
     """
-    1) close (days 1..5 MSK, or unfinished / --force) — YAML + pipeline_run
+    1) close only on days 1..5 MSK (or --force) — YAML + pipeline_run
     2) last day >= 08:00 MSK — idle
     3) penultimate (or last day < 08:00) — harvest priority<=100
     4) else — harvest all priorities
 
+    Unfinished close after day 5 is not auto-resumed; use manual commands.
     No sleeping for quota; cron re-invokes later.
     """
     now = _now_msk()
