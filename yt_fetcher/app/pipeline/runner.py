@@ -303,10 +303,13 @@ async def run_auto(
     force: bool = False,
 ) -> None:
     """
-    1) close only on days 1..5 MSK (or --force) — YAML + pipeline_run
-    2) last day >= 08:00 MSK — idle
-    3) penultimate (or last day < 08:00) — harvest priority<=100
-    4) else — harvest all priorities
+    Mutually exclusive phases (never chain close → harvest in one run):
+
+    1) days 1..5 MSK (or --force): close only — YAML + pipeline_run
+    2) outside close window:
+       - last day >= 08:00 MSK — idle
+       - penultimate (or last day < 08:00) — harvest priority<=100
+       - else — harvest all priorities
 
     Unfinished close after day 5 is not auto-resumed; use manual commands.
     No sleeping for quota; cron re-invokes later.
@@ -318,9 +321,8 @@ async def run_auto(
     close_status = await _run_close(
         category_ids=category_ids, force=force, now=now
     )
-    if close_status == "paused":
-        return
-    if force and close_status != "skipped":
+    # Close stage (in window / --force): never fall through to harvest.
+    if close_status != "skipped":
         return
 
     priority = _harvest_priority(now)

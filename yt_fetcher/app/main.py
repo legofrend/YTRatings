@@ -20,7 +20,7 @@ Commands:
   sync-priority — channel.priority = best pv_score_rank over last N months (default 12)
   wordstat-fill — fill wordstat top-N lexemes (longs) for cats×periods; type=NULL
   wordstat-type — backfill wordstat.type from MoM sets (−1/0/1/2)
-  auto          — close (days 1–5) and/or harvest by calendar (see scenarios/)
+  auto          — close (days 1–5) XOR harvest by calendar (never both; see scenarios/)
 
 Examples:
   python -m app.main channel-stat --cats 1
@@ -58,6 +58,7 @@ Examples:
   python -m app.main wordstat-fill --cats 1 --period 2026-02 --period-to 2026-08
   python -m app.main wordstat-fill --cats 1 --period 2026-08 --top 40
   python -m app.main wordstat-type --cats 1
+  python -m app.main wordstat-type --period 2026-08 --period-to 2026-09
   python -m app.main apply-is-short --cats 1 --ntfy info
   python -m app.main channel-stat --ntfy error
   python -m app.main auto
@@ -559,11 +560,21 @@ async def cmd_wordstat_fill(
     logger.info(f"wordstat-fill done: {stats}")
 
 
-async def cmd_wordstat_type(category_ids: list[int] | None) -> None:
+async def cmd_wordstat_type(
+    category_ids: list[int] | None,
+    period: Period | None = None,
+    period_to: Period | None = None,
+) -> None:
     from app.wordstat import WordstatDAO
 
-    logger.info(f"wordstat-type cats={category_ids}")
-    stats = await WordstatDAO.backfill_type(category_ids=category_ids)
+    logger.info(
+        f"wordstat-type cats={category_ids} period={period} period_to={period_to}"
+    )
+    stats = await WordstatDAO.backfill_type(
+        category_ids=category_ids,
+        period_from=period,
+        period_to=period_to,
+    )
     logger.info(f"wordstat-type done: {stats}")
 
 
@@ -630,7 +641,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--period-to",
         default=None,
-        help="backfill-denorm / channel-report / wordstat-fill / wordstat-svg: inclusive end period YYYY-MM (with --period as start)",
+        help="backfill-denorm / channel-report / wordstat-fill / wordstat-type / wordstat-svg: inclusive end period YYYY-MM (with --period as start)",
     )
     p.add_argument(
         "--batch-size",
@@ -970,7 +981,11 @@ async def _run_parsed(args: argparse.Namespace) -> None:
                 top_n=args.top,
             )
         elif name == "wordstat-type":
-            coro = cmd_wordstat_type(parse_cats(args.cats))
+            coro = cmd_wordstat_type(
+                parse_cats(args.cats),
+                Period.parse(args.period) if args.period else None,
+                Period.parse(args.period_to) if args.period_to else None,
+            )
         elif name == "wordstat-svg":
             if not args.period:
                 raise SystemExit("wordstat-svg requires --period")

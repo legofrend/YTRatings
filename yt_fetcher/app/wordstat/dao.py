@@ -15,17 +15,11 @@ from app.wordstat.models import Wordstat
 
 STOP_LEXEMES_PATH = Path(__file__).with_name("stop_lexemes.txt")
 
-# type codes (NULL until backfill)
-TYPE_LEAVING = -1
-TYPE_CORE = 0
-TYPE_NEW = 1
-TYPE_BOTH = 2
-
-DEFAULT_TOP_N = 40
-
 
 def load_stop_lexemes(path: Path | str | None = None) -> list[str]:
     p = Path(path) if path else STOP_LEXEMES_PATH
+    if not p.is_file():
+        return []
     out: list[str] = []
     seen: set[str] = set()
     for raw in p.read_text(encoding="utf-8").splitlines():
@@ -35,6 +29,31 @@ def load_stop_lexemes(path: Path | str | None = None) -> list[str]:
         seen.add(s)
         out.append(s)
     return out
+
+
+def stop_lexemes_for_category(category_id: int) -> list[str]:
+    """Global stops + optional `stop_lexemes_{category_id}.txt` (merged, deduped)."""
+    base = load_stop_lexemes()
+    extra_path = STOP_LEXEMES_PATH.with_name(f"stop_lexemes_{int(category_id)}.txt")
+    extra = load_stop_lexemes(extra_path)
+    if not extra:
+        return base
+    seen = set(base)
+    out = list(base)
+    for s in extra:
+        if s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out
+
+
+# type codes (NULL until backfill)
+TYPE_LEAVING = -1
+TYPE_CORE = 0
+TYPE_NEW = 1
+TYPE_BOTH = 2
+
+DEFAULT_TOP_N = 40
 
 
 def _as_date(p: date | Period | str) -> date:
@@ -77,12 +96,19 @@ class WordstatDAO:
         if end < start:
             start, end = end, start
         periods = _period_range(start, end)
-        stops = stop_lexemes if stop_lexemes is not None else load_stop_lexemes(stop_path)
+        explicit_stops = stop_lexemes
+        if explicit_stops is None and stop_path is not None:
+            explicit_stops = load_stop_lexemes(stop_path)
 
         inserted = 0
         deleted = 0
         async with async_session_maker() as session:
             for category_id in category_ids:
+                stops = (
+                    explicit_stops
+                    if explicit_stops is not None
+                    else stop_lexemes_for_category(category_id)
+                )
                 for period in periods:
                     n_del = await session.execute(
                         delete(Wordstat).where(
@@ -172,8 +198,20 @@ class WordstatDAO:
         cls,
         *,
         category_ids: list[int] | None = None,
+        period_from: date | Period | str | None = None,
+        period_to: date | Period | str | None = None,
     ) -> dict:
-        """Set type from MoM presence within each category (all periods present)."""
+        """Set type from MoM presence within each category.
+
+        Loads full period timeline for neighbor sets, but only UPDATEs rows whose
+        period is in [period_from, period_to] when those are set (inclusive).
+        Omit both → all periods (legacy).
+        """
+        start = _as_date(period_from) if period_from is not None else None
+        end = _as_date(period_to) if period_to is not None else start
+        if start is not None and end is not None and end < start:
+            start, end = end, start
+
         updated = 0
         async with async_session_maker() as session:
             cat_q = select(Wordstat.category_id).distinct()
@@ -208,7 +246,11 @@ class WordstatDAO:
                     ).scalars().all()
                     sets[period] = set(lexemes)
 
+                typed_n = 0
                 for i, period in enumerate(periods):
+                    if start is not None and (period < start or period > end):
+                        continue
+
                     prev_set = sets[periods[i - 1]] if i > 0 else None
                     next_set = sets[periods[i + 1]] if i + 1 < len(periods) else None
                     cur = sets[period]
@@ -245,15 +287,26 @@ class WordstatDAO:
                             .values(type=t)
                         )
                         updated += res.rowcount or 0
+                    typed_n += 1
 
                 logger.info(
                     f"wordstat type backfill cat={category_id} "
-                    f"periods={len(periods)}"
+                    f"typed={typed_n}/{len(periods)} periods"
+                    + (
+                        f" range={start}..{end}"
+                        if start is not None
+                        else ""
+                    )
                 )
 
             await session.commit()
 
-        return {"categories": cats, "updated": updated}
+        return {
+            "categories": cats,
+            "updated": updated,
+            "period_from": start.isoformat() if start else None,
+            "period_to": end.isoformat() if end else None,
+        }
 
     @classmethod
     async def report(
