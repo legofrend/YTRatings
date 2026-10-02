@@ -322,9 +322,10 @@ class ReportDAO(BaseDAO):
         report = SReport(**report)
         data = report.data
 
-        tmpl_path = (
-            tmpl_path
-            or f"../video_gen/{period.strf("%p")}/{report.category.name}/tmpl.png"
+        from app.media_paths import video_gen_dir
+
+        tmpl_path = tmpl_path or str(
+            video_gen_dir() / period.strf("%p") / report.category.name / "tmpl.png"
         )
 
         for item in data[:top_channels]:
@@ -341,11 +342,12 @@ class ReportDAO(BaseDAO):
     async def generate_script(
         cls, tmpl_path: str, period: Period, category_id: int, output_file: str = None
     ):
+        from app.media_paths import video_gen_dir
         from app.report.tools import gen_script
 
         report = await ReportDAO.get(period, category_id)
         if not output_file:
-            parent_dir = r"../video_gen/"
+            parent_dir = str(video_gen_dir())
             output_dir = output_file or os.path.join(
                 parent_dir, period.strftime("%Y-%m"), report.category.name
             )

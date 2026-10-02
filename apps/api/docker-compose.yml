@@ -1,3 +1,7 @@
+# Pinned: compose derives the project name from the directory otherwise, and
+# renaming it would orphan the running o2t4_db / ytr_app containers and network.
+name: yt_fetcher
+
 services:
   db:
     image: postgres:16

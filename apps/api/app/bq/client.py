@@ -61,7 +61,7 @@ class BqTestResult:
 
 
 def _project_root() -> Path:
-    # app/bq/client.py → yt_fetcher/
+    # app/bq/client.py → apps/api/
     return Path(__file__).resolve().parents[2]
 
 

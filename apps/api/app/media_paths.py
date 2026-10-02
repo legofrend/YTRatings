@@ -5,8 +5,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-# yt_fetcher/app/media_paths.py → parents[2] = repo root
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+# apps/api/app/media_paths.py → parents[3] = repo root
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def repo_root() -> Path:
@@ -30,3 +30,8 @@ def wordstat_img_dir() -> Path:
     if env := os.environ.get("WORDSTAT_OUT_DIR"):
         return Path(env)
     return media_root() / "wordstat_img"
+
+
+def video_gen_dir() -> Path:
+    """Local-only video/cover workspace (gitignored)."""
+    return _REPO_ROOT / "tools" / "video_gen"

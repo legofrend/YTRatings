@@ -124,8 +124,10 @@ def render_info_pic(
     output_dir: str = None,
 ):
 
+    from app.media_paths import video_gen_dir
+
     # Prepare variables
-    parent_dir = r"..\video_gen\\"
+    parent_dir = str(video_gen_dir())
     # work_dir = os.path.join(parent_dir, "templates")
     # tmpl_path = os.path.join(work_dir, "tmpl_movie.png")
     # star_path = os.path.join(work_dir, "star.png")

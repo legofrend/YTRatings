@@ -27,7 +27,7 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUT = ROOT / "data" / "livedune_youtube_world.json"
 BASE = "https://livedune.com"
 LIST_URL = BASE + "/ru/ratings/youtube/?page={page}"

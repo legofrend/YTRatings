@@ -12,18 +12,24 @@
 
 ## Структура monorepo
 
-| Папка | Роль |
-|-------|------|
-| `yt_fetcher/` | monthly pipeline (ingest) + FastAPI + Docker |
-| `frontend-nuxt/` | Nuxt SSG — рейтинг |
-| `media/` | generated assets (channel logos, wordstat SVG) — **не в git** |
-| `site/` | local/VPS mirror of Nuxt `.output/public` — **не в git** |
-| `scripts/` | deploy / dev helpers |
-| `nginx/` | backup of VPS nginx conf |
-| `analysis/` | notebooks (optional) |
-| `data/` | local seed/scratch — **не в git** |
+```
+apps/
+  api/        Python: monthly pipeline (ingest) + FastAPI + Docker
+  web/        Nuxt SSG — сайт рейтинга
+deploy/       всё, что едет на VPS
+  deploy-ytr.ps1 / .sh   точка входа деплоя с ПК
+  nginx/                 конфиг сайта (копия /etc/nginx/sites-available/ytr)
+  systemd/               ytr-auto.service / .timer + run-auto.sh
+scripts/      локальная разработка (dev-ytr.ps1 / .sh)
+tools/        analysis/ (notebooks), video_gen/ — вспомогательное, в основном не в git
+media/        generated: channel_logo/, wordstat_img/ — не в git
+site/         зеркало Nuxt .output/public для деплоя — не в git
+data/         локальные seed/scratch — не в git
+```
 
-### Подсказка по файлам (`yt_fetcher`)
+Правило: код приложений — в `apps/*`, инфраструктура — в `deploy/`, runtime-артефакты (`media/`, `site/`, `data/`) в git не попадают.
+
+### Подсказка по файлам (`apps/api`)
 
 - `app/api/ytapi` — работа с YouTube API
 - `app/.../dao`, `models` — работа с БД (Postgres; raw ingest может писать в BigQuery)
@@ -63,13 +69,15 @@ Main objects and properties:
 | Что | Путь |
 |-----|------|
 | git-репо | `/var/www/o2t4/backend/YTRatings/` |
-| backend + compose | `.../yt_fetcher/` |
-| frontend source | `.../frontend-nuxt/` |
+| backend + compose | `.../apps/api/` (`.env`, `.env-docker`, `.venv` — тут) |
+| frontend source | `.../apps/web/` |
 | live SSG (nginx root) | `.../site/` |
 | generated media | `.../media/channel_logo/`, `.../media/wordstat_img/` |
 | nginx конфиг | `/etc/nginx/sites-available/ytr` → `sites-enabled/ytr` |
-| backup nginx в репо | `nginx/ytr.nginx.conf` |
-| docker | `ytr_app` (:5001), `o2t4_db` (:5433) из `yt_fetcher/docker-compose.yml` |
+| копия nginx в репо | `deploy/nginx/ytr.nginx.conf` |
+| systemd | `deploy/systemd/ytr-auto.{service,timer}` → `/etc/systemd/system/` |
+| логи | `.../apps/api/logs/yt_fetcher.log`, `auto-cron.log` |
+| docker | `ytr_app` (:5001), `o2t4_db` (:5433) из `apps/api/docker-compose.yml` (compose project `yt_fetcher`) |
 
 ### nginx (сайт ytr)
 
@@ -81,16 +89,37 @@ Main objects and properties:
 | `ytr.o2t4.ru/api/ytr/` | proxy → `http://127.0.0.1:5001/api/ytr/` |
 | `o2t4.ru` | `/var/www/o2t4/` (лендинг, не Vue app) |
 
-### Миграция media (один раз на VPS)
+### Миграция на layout `apps/` + `media/` (один раз на VPS)
 
 ```bash
 cd /var/www/o2t4/backend/YTRatings
+git fetch && git checkout refactor/media-and-cleanup && git pull
+
+# 1) секреты и логи API: не в git, git pull их не переносит
+for f in .env .env-docker ytr_sa_key.json logs; do
+  [ -e yt_fetcher/$f ] && [ ! -e apps/api/$f ] && mv yt_fetcher/$f apps/api/
+done
+
+# 2) host venv для auto (venv нельзя переносить — пересоздать)
+cd apps/api && python3.12 -m venv .venv \
+  && .venv/bin/pip install -r <(poetry export --with ingest --without-hashes) && cd ../..
+
+# 3) media + site
 mkdir -p media site
-# если ещё лежат в старом frontend/dist:
 mv frontend/dist/channel_logo media/ 2>/dev/null || true
 mv frontend/dist/wordstat_img media/ 2>/dev/null || true
-# скопировать nginx/ytr.nginx.conf → /etc/nginx/sites-available/ytr
+
+# 4) docker: тот же compose project (name: yt_fetcher) — контейнеры пересоберутся на месте
+cd apps/api && docker compose up -d --build && cd ../..
+
+# 5) nginx + systemd
+cp deploy/nginx/ytr.nginx.conf /etc/nginx/sites-available/ytr
 nginx -t && systemctl reload nginx
+cp deploy/systemd/ytr-auto.service deploy/systemd/ytr-auto.timer /etc/systemd/system/
+chmod +x deploy/systemd/run-auto.sh && systemctl daemon-reload
+
+# 6) после проверки сайта: снести старое
+# rm -rf yt_fetcher frontend frontend-nuxt
 ```
 
 ### Не путать с другими проектами на том же VPS
@@ -113,17 +142,18 @@ ssh root@o2t4.ru
 
 ```powershell
 # commit (если dirty) + push + Nuxt SSG + VPS docker rebuild + sync site/
-.\scripts\deploy-ytr.ps1 -CommitMessage "your message"
+.\deploy\deploy-ytr.ps1 -CommitMessage "your message"
 
 # уже закоммичено:
-.\scripts\deploy-ytr.ps1 -SkipCommit
+.\deploy\deploy-ytr.ps1 -SkipCommit
 
 # только фронт / только бэк:
-.\scripts\deploy-ytr.ps1 -SkipCommit -SkipDocker
-.\scripts\deploy-ytr.ps1 -SkipCommit -SkipGenerate -SkipFrontend
+.\deploy\deploy-ytr.ps1 -SkipCommit -SkipDocker
+.\deploy\deploy-ytr.ps1 -SkipCommit -SkipGenerate -SkipFrontend
 ```
 
-Git Bash / WSL: `./scripts/deploy-ytr.sh -m "..."`.  
+Git Bash / WSL: `./deploy/deploy-ytr.sh -m "..."`.  
+Локальный dev (FastAPI :5000 + Nuxt :3000): `.\scripts\dev-ytr.ps1`.  
 `media/` на VPS не в git и не затирается деплоем. SSG по умолчанию с `https://ytr.o2t4.ru/api/ytr/v2`.
 
 ### Типичный ручной деплой
@@ -133,15 +163,17 @@ cd /var/www/o2t4/backend/YTRatings
 git fetch && git checkout <branch> && git pull
 
 # API
-cd yt_fetcher && docker compose up -d --build
+cd apps/api && docker compose up -d --build
 
 # Frontend SSG: собрать локально, залить .output/public → site/
 # media/ не трогать
 ```
 
-## Локально: poetry groups (`yt_fetcher`)
+## Локально: poetry groups (`apps/api`)
 
 ```bash
+cd apps/api
+python -m venv .venv            # poetry подхватит in-project .venv
 poetry install                  # только API (как в Docker)
 poetry install --with ingest    # monthly pipeline + BQ
 poetry install --with ingest,dev
@@ -150,7 +182,7 @@ poetry install --with ingest,dev
 ## Pipeline CLI
 
 ```bash
-cd yt_fetcher
+cd apps/api
 python -m app.main channel-stat --cats 1
 python -m app.main videos --cats 1
 python -m app.main video-stat --cats 1

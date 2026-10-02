@@ -4,10 +4,10 @@
   Optional commit -> push -> Nuxt SSG -> VPS pull + docker rebuild -> sync site/
 
 .EXAMPLE
-  .\scripts\deploy-ytr.ps1 -CommitMessage "Ship edit-channels + Shift+click JSONL template"
-  .\scripts\deploy-ytr.ps1 -SkipCommit
-  .\scripts\deploy-ytr.ps1 -SkipCommit -SkipGenerate
-  .\scripts\deploy-ytr.ps1 -SkipDocker
+  .\deploy\deploy-ytr.ps1 -CommitMessage "Ship edit-channels + Shift+click JSONL template"
+  .\deploy\deploy-ytr.ps1 -SkipCommit
+  .\deploy\deploy-ytr.ps1 -SkipCommit -SkipGenerate
+  .\deploy\deploy-ytr.ps1 -SkipDocker
 #>
 param(
   [string]$CommitMessage = "",
@@ -51,11 +51,11 @@ if (-not $SkipCommit) {
     Step "git add + commit"
     git add -u
     git add `
-      scripts/deploy-ytr.ps1 `
-      scripts/deploy-ytr.sh `
-      yt_fetcher/app/channel/edit_channels.py `
-      yt_fetcher/scripts/channel_edits.example.csv `
-      yt_fetcher/scripts/channel_edits.example.jsonl `
+      deploy/deploy-ytr.ps1 `
+      deploy/deploy-ytr.sh `
+      apps/api/app/channel/edit_channels.py `
+      apps/api/scripts/channel_edits.example.csv `
+      apps/api/scripts/channel_edits.example.jsonl `
       2>$null
     git status -sb
     git commit -m $CommitMessage
@@ -73,12 +73,12 @@ if (-not $SkipPush) {
 }
 
 $siteLocal = Join-Path $RepoRoot "site"
-$ssgOut = Join-Path $RepoRoot "frontend-nuxt\.output\public"
+$ssgOut = Join-Path $RepoRoot "apps\web\.output\public"
 
 # --- SSG ---
 if (-not $SkipGenerate) {
   Step "Nuxt SSG (NUXT_API_BASE=$ApiBase)"
-  Push-Location (Join-Path $RepoRoot "frontend-nuxt")
+  Push-Location (Join-Path $RepoRoot "apps\web")
   try {
     $env:NUXT_API_BASE = $ApiBase
     $env:NUXT_PUBLIC_API_BASE = "/api/ytr/v2"
@@ -106,7 +106,7 @@ if (-not $SkipGenerate) {
 # --- VPS: pull + docker ---
 if (-not $SkipDocker) {
   Step "VPS git pull + docker compose up --build"
-  $remoteCmd = "set -e; cd '$RemoteRoot'; git fetch origin; git checkout '$branch' || git checkout -B '$branch' origin/$branch; git pull --ff-only origin '$branch'; mkdir -p media/channel_logo media/wordstat_img site; cd yt_fetcher; docker compose up -d --build; docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
+  $remoteCmd = "set -e; cd '$RemoteRoot'; git fetch origin; git checkout '$branch' || git checkout -B '$branch' origin/$branch; git pull --ff-only origin '$branch'; mkdir -p media/channel_logo media/wordstat_img site; test -f apps/api/.env || { echo 'apps/api/.env missing - run the one-time layout migration (README)'; exit 1; }; cd apps/api; docker compose up -d --build; docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
   ssh $RemoteHost $remoteCmd
   Assert-Ok "remote docker deploy"
 }

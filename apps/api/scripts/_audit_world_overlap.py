@@ -12,7 +12,7 @@ from sqlalchemy import text
 
 from app.database import async_session_maker
 
-OUT = Path(__file__).resolve().parents[2] / "data" / "world_category_overlap.json"
+OUT = Path(__file__).resolve().parents[3] / "data" / "world_category_overlap.json"
 WORLD_CAT = 19
 IMPORT_DAY = "2026-09-19"
 

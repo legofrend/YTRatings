@@ -10,7 +10,7 @@ const SITE_URL = (
 ).replace(/\/$/, '')
 
 const rootDir = dirname(fileURLToPath(import.meta.url))
-const mediaRoot = join(rootDir, '..', 'media')
+const mediaRoot = join(rootDir, '..', '..', 'media')
 
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url)
@@ -203,7 +203,7 @@ export default defineNuxtConfig({
       {
         name: 'ytr-serve-media',
         configureServer(server) {
-          // Generated assets live in ../media — not copied into SSG output.
+          // Generated assets live in <repo>/media — not copied into SSG output.
           const mime: Record<string, string> = {
             '.jpg': 'image/jpeg',
             '.jpeg': 'image/jpeg',

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Git Bash / WSL / Linux: same pipeline as deploy-ytr.ps1
 # Usage:
-#   ./scripts/deploy-ytr.sh -m "Ship edit-channels"
-#   ./scripts/deploy-ytr.sh --skip-commit
-#   ./scripts/deploy-ytr.sh --skip-commit --skip-generate
+#   ./deploy/deploy-ytr.sh -m "Ship edit-channels"
+#   ./deploy/deploy-ytr.sh --skip-commit
+#   ./deploy/deploy-ytr.sh --skip-commit --skip-generate
 set -euo pipefail
 
 COMMIT_MSG=""
@@ -44,10 +44,10 @@ if [[ "$SKIP_COMMIT" -eq 0 ]]; then
     [[ -n "$COMMIT_MSG" ]] || { echo "Dirty tree: pass -m '...' or --skip-commit"; exit 1; }
     step "git add + commit"
     git add -u
-    git add scripts/deploy-ytr.ps1 scripts/deploy-ytr.sh \
-      yt_fetcher/app/channel/edit_channels.py \
-      yt_fetcher/scripts/channel_edits.example.csv \
-      yt_fetcher/scripts/channel_edits.example.jsonl 2>/dev/null || true
+    git add deploy/deploy-ytr.ps1 deploy/deploy-ytr.sh \
+      apps/api/app/channel/edit_channels.py \
+      apps/api/scripts/channel_edits.example.csv \
+      apps/api/scripts/channel_edits.example.jsonl 2>/dev/null || true
     git commit -m "$COMMIT_MSG"
   else
     echo "Nothing to commit."
@@ -60,12 +60,12 @@ if [[ "$SKIP_PUSH" -eq 0 ]]; then
 fi
 
 SITE_LOCAL="$ROOT/site"
-SSG_OUT="$ROOT/frontend-nuxt/.output/public"
+SSG_OUT="$ROOT/apps/web/.output/public"
 
 if [[ "$SKIP_GENERATE" -eq 0 ]]; then
   step "Nuxt SSG (NUXT_API_BASE=$API_BASE)"
   (
-    cd frontend-nuxt
+    cd apps/web
     export NUXT_API_BASE="$API_BASE"
     export NUXT_PUBLIC_API_BASE="/api/ytr/v2"
     export NUXT_PUBLIC_SITE_URL="https://ytr.o2t4.ru"
@@ -93,7 +93,8 @@ git fetch origin
 git checkout '$BRANCH' || git checkout -B '$BRANCH' "origin/$BRANCH"
 git pull --ff-only origin '$BRANCH'
 mkdir -p media/channel_logo media/wordstat_img site
-cd yt_fetcher
+test -f apps/api/.env || { echo 'apps/api/.env missing - run the one-time layout migration (README)'; exit 1; }
+cd apps/api
 docker compose up -d --build
 docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
 EOF

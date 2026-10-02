@@ -17,22 +17,22 @@ param(
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
-$Fetcher = Join-Path $RepoRoot "yt_fetcher"
-$Frontend = Join-Path $RepoRoot "frontend-nuxt"
+$Fetcher = Join-Path $RepoRoot "apps\api"
+$Frontend = Join-Path $RepoRoot "apps\web"
 $Python = Join-Path $Fetcher ".venv\Scripts\python.exe"
 
 function Assert-Python {
   if (-not (Test-Path $Python)) {
-    throw "No venv at $Python`n  cd yt_fetcher; poetry install"
+    throw "No venv at $Python`n  cd apps\api; python -m venv .venv; poetry install --with ingest,dev"
   }
 }
 
 function Assert-Frontend {
   if (-not (Test-Path (Join-Path $Frontend "package.json"))) {
-    throw "Missing frontend-nuxt/package.json"
+    throw "Missing apps/web/package.json"
   }
   if (-not (Test-Path (Join-Path $Frontend "node_modules"))) {
-    Write-Host "npm install (frontend-nuxt)..." -ForegroundColor Yellow
+    Write-Host "npm install (apps/web)..." -ForegroundColor Yellow
     Push-Location $Frontend
     try { npm install } finally { Pop-Location }
     if ($LASTEXITCODE -ne 0) { throw "npm install failed" }

@@ -1,11 +1,14 @@
-/analysis/*
-!/analysis/channel_analytics.ipynb
+/tools/analysis/*
+!/tools/analysis/channel_analytics.ipynb
+/tools/video_gen/
 /data/
-/video_gen/
 /backend/
 .vscode/
 /site/
 /media/**
 !/media/README.md
-/yt_fetcher/logs/
+/apps/api/logs/
 /bar_race/
+# leftovers of the pre-apps/ layout (local venv/logs only)
+/yt_fetcher/
+/frontend-nuxt/

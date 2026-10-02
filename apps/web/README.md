@@ -1,4 +1,4 @@
-# frontend-nuxt
+# apps/web
 
 Hybrid SSG: **одна статическая страница на категорию** (latest period).  
 Архив периодов — клиентский fetch к FastAPI.
@@ -18,7 +18,7 @@ Hybrid SSG: **одна статическая страница на катего
 Локальный FastAPI на `:5000` (с `sys_name` в `/categories`):
 
 ```bash
-cd frontend-nuxt
+cd apps/web
 npm install
 npm run dev          # proxy /api → :5000
 ```
@@ -36,7 +36,7 @@ npm run generate     # ~N HTML = активные категории + /404 + si
 
 Нужен `NUXT_API_BASE` с `sys_name` (локальный API или задеплоенный бэкенд).  
 Артефакт: `.output/public/` → `site/` → nginx. Node на VPS не нужен.  
-Логотипы / wordstat — `../media/` (vite middleware в dev; nginx alias на проде).
+Логотипы / wordstat — `<repo>/media/` (vite middleware в dev; nginx alias на проде).
 
 ## Прод
 

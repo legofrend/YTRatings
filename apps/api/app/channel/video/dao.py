@@ -771,11 +771,11 @@ class VideoDAO(BaseDAO):
     async def get_thumbnails(
         cls, channel_ids: list[str] = None, category_id: int = None
     ) -> None:
+        from app.media_paths import video_gen_dir
         from app.report.tools import download_file
         import os
 
-        # workdir = r'C:\Users\eremi\Documents\4. Projects\2024-07 YTRatings\video_gen\channel_logo'
-        workdir = r"..\video_gen\channel_logo" + os.sep + str(category_id)
+        workdir = str(video_gen_dir() / "channel_logo" / str(category_id))
         os.makedirs(workdir, exist_ok=True)
         # if not channel_ids:
         channels = await cls.find_all(category_id=category_id, status=1)
