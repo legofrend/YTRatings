@@ -26,7 +26,7 @@ DEFAULT_SSH_HOST = "root@195.133.201.63"
 DEFAULT_PRIORITY = 100
 DEFAULT_WORKERS = 20
 DEFAULT_MAX_SORT_ORDER = 5
-REMOTE_DIR = "/var/www/o2t4/backend/YTRatings/frontend/dist/channel_logo"
+REMOTE_DIR = "/var/www/o2t4/backend/YTRatings/media/channel_logo"
 MIN_BYTES = 100
 
 

@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Optional commit -> push -> Nuxt SSG -> VPS pull + docker rebuild -> sync frontend/dist
+  Optional commit -> push -> Nuxt SSG -> VPS pull + docker rebuild -> sync site/
 
 .EXAMPLE
   .\scripts\deploy-ytr.ps1 -CommitMessage "Ship edit-channels + Shift+click JSONL template"
@@ -72,7 +72,7 @@ if (-not $SkipPush) {
   Assert-Ok "git push"
 }
 
-$distLocal = Join-Path $RepoRoot "frontend\dist"
+$siteLocal = Join-Path $RepoRoot "site"
 $ssgOut = Join-Path $RepoRoot "frontend-nuxt\.output\public"
 
 # --- SSG ---
@@ -94,9 +94,9 @@ if (-not $SkipGenerate) {
     throw "SSG output missing: $ssgOut"
   }
 
-  Step "Mirror SSG to frontend/dist (keep local channel_logo/ + wordstat_img/)"
-  New-Item -ItemType Directory -Force -Path $distLocal | Out-Null
-  robocopy $ssgOut $distLocal /E /XD channel_logo wordstat_img /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
+  Step "Mirror SSG to site/ (media/ is separate — nginx aliases)"
+  New-Item -ItemType Directory -Force -Path $siteLocal | Out-Null
+  robocopy $ssgOut $siteLocal /MIR /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
   if ($LASTEXITCODE -ge 8) {
     throw "robocopy failed (exit $LASTEXITCODE)"
   }
@@ -106,23 +106,21 @@ if (-not $SkipGenerate) {
 # --- VPS: pull + docker ---
 if (-not $SkipDocker) {
   Step "VPS git pull + docker compose up --build"
-  $remoteCmd = "set -e; cd '$RemoteRoot'; git fetch origin; git checkout '$branch' || git checkout -B '$branch' origin/$branch; git pull --ff-only origin '$branch'; cd yt_fetcher; docker compose up -d --build; docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
+  $remoteCmd = "set -e; cd '$RemoteRoot'; git fetch origin; git checkout '$branch' || git checkout -B '$branch' origin/$branch; git pull --ff-only origin '$branch'; mkdir -p media/channel_logo media/wordstat_img site; cd yt_fetcher; docker compose up -d --build; docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
   ssh $RemoteHost $remoteCmd
   Assert-Ok "remote docker deploy"
 }
 
-# --- VPS: sync frontend dist (preserve remote channel_logo/) ---
+# --- VPS: sync site (media/ stays on disk, never in this tarball) ---
 if (-not $SkipFrontend) {
-  if (-not (Test-Path $distLocal)) {
-    throw "Local frontend/dist missing - run without -SkipGenerate first"
+  if (-not (Test-Path $siteLocal)) {
+    throw "Local site/ missing - run without -SkipGenerate first"
   }
-  Step "Sync frontend/dist to VPS (exclude channel_logo/ + wordstat_img/)"
-  $remoteDist = "$RemoteRoot/frontend/dist"
-  # PowerShell '|' corrupts binary streams - use cmd.exe for tar|ssh
-  $distUnix = ($distLocal -replace '\\', '/')
-  $cmd = "tar -C `"$distLocal`" --exclude=channel_logo --exclude=wordstat_img -cf - . | ssh $RemoteHost `"mkdir -p '$remoteDist' && tar -xf - -C '$remoteDist'`""
+  Step "Sync site/ to VPS"
+  $remoteSite = "$RemoteRoot/site"
+  $cmd = "tar -C `"$siteLocal`" -cf - . | ssh $RemoteHost `"mkdir -p '$remoteSite' && tar -xf - -C '$remoteSite'`""
   cmd.exe /c $cmd
-  Assert-Ok "frontend sync"
+  Assert-Ok "site sync"
 
   Step "nginx reload"
   ssh $RemoteHost "nginx -t; systemctl reload nginx"

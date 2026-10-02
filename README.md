@@ -15,13 +15,19 @@
 | Папка | Роль |
 |-------|------|
 | `yt_fetcher/` | monthly pipeline (ingest) + FastAPI + Docker |
-| `frontend/` | Vue 3 (Vite) — веб-оболочка рейтинга |
+| `frontend-nuxt/` | Nuxt SSG — рейтинг |
+| `media/` | generated assets (channel logos, wordstat SVG) — **не в git** |
+| `site/` | local/VPS mirror of Nuxt `.output/public` — **не в git** |
+| `scripts/` | deploy / dev helpers |
+| `nginx/` | backup of VPS nginx conf |
+| `analysis/` | notebooks (optional) |
+| `data/` | local seed/scratch — **не в git** |
 
 ### Подсказка по файлам (`yt_fetcher`)
 
 - `app/api/ytapi` — работа с YouTube API
 - `app/.../dao`, `models` — работа с БД (Postgres; raw ingest может писать в BigQuery)
-- `logger`, `config`, `period` — вспомогательные классы и функции
+- `logger`, `config`, `period`, `media_paths` — вспомогательные классы и функции
 - `sql/views*.sql`, `sql/build_report_bq.sql` — views / сборка отчёта
 - `app/main.py` — CLI пайплайна
 - `app/fast_api` — API для фронта
@@ -31,6 +37,7 @@
 - `YT_API_KEY=...`
 - `LOG_LEVEL=INFO`
 - `RAW_DB=postgres|bigquery`
+- `YTR_MEDIA_ROOT=...` — корень `media/` (на VPS: `/var/www/o2t4/backend/YTRatings/media`)
 - DB_* / BQ_* — см. `app/config.py`
 
 Секреты (пароли, API keys, SA JSON) — только в `.env` / на VPS, **не в git**.
@@ -56,10 +63,10 @@ Main objects and properties:
 | Что | Путь |
 |-----|------|
 | git-репо | `/var/www/o2t4/backend/YTRatings/` |
-| backend + compose | `/var/www/o2t4/backend/YTRatings/yt_fetcher/` |
-| frontend source (legacy SPA) | `/var/www/o2t4/backend/YTRatings/frontend/` |
-| frontend-nuxt (SSG) | `/var/www/o2t4/backend/YTRatings/frontend-nuxt/` |
-| frontend live (nginx root) | `/var/www/o2t4/backend/YTRatings/frontend/dist/` |
+| backend + compose | `.../yt_fetcher/` |
+| frontend source | `.../frontend-nuxt/` |
+| live SSG (nginx root) | `.../site/` |
+| generated media | `.../media/channel_logo/`, `.../media/wordstat_img/` |
 | nginx конфиг | `/etc/nginx/sites-available/ytr` → `sites-enabled/ytr` |
 | backup nginx в репо | `nginx/ytr.nginx.conf` |
 | docker | `ytr_app` (:5001), `o2t4_db` (:5433) из `yt_fetcher/docker-compose.yml` |
@@ -68,9 +75,23 @@ Main objects and properties:
 
 | Host | Что отдаёт |
 |------|------------|
-| `ytr.o2t4.ru` | `root` → `.../frontend/dist/` (Nuxt SSG) |
+| `ytr.o2t4.ru` | `root` → `.../site/` |
+| `ytr.o2t4.ru/channel_logo/` | alias → `.../media/channel_logo/` |
+| `ytr.o2t4.ru/wordstat_img/` | alias → `.../media/wordstat_img/` |
 | `ytr.o2t4.ru/api/ytr/` | proxy → `http://127.0.0.1:5001/api/ytr/` |
 | `o2t4.ru` | `/var/www/o2t4/` (лендинг, не Vue app) |
+
+### Миграция media (один раз на VPS)
+
+```bash
+cd /var/www/o2t4/backend/YTRatings
+mkdir -p media site
+# если ещё лежат в старом frontend/dist:
+mv frontend/dist/channel_logo media/ 2>/dev/null || true
+mv frontend/dist/wordstat_img media/ 2>/dev/null || true
+# скопировать nginx/ytr.nginx.conf → /etc/nginx/sites-available/ytr
+nginx -t && systemctl reload nginx
+```
 
 ### Не путать с другими проектами на том же VPS
 
@@ -91,7 +112,7 @@ ssh root@o2t4.ru
 ### Деплой с ПК (рекомендуется)
 
 ```powershell
-# commit (если dirty) + push + Nuxt SSG + VPS docker rebuild + sync frontend/dist
+# commit (если dirty) + push + Nuxt SSG + VPS docker rebuild + sync site/
 .\scripts\deploy-ytr.ps1 -CommitMessage "your message"
 
 # уже закоммичено:
@@ -103,7 +124,7 @@ ssh root@o2t4.ru
 ```
 
 Git Bash / WSL: `./scripts/deploy-ytr.sh -m "..."`.  
-`channel_logo/` и `wordstat_img/` на VPS не в git и не затираются деплоем (живут в `frontend/dist/`). SSG по умолчанию с `https://ytr.o2t4.ru/api/ytr/v2`.
+`media/` на VPS не в git и не затирается деплоем. SSG по умолчанию с `https://ytr.o2t4.ru/api/ytr/v2`.
 
 ### Типичный ручной деплой
 
@@ -114,9 +135,8 @@ git fetch && git checkout <branch> && git pull
 # API
 cd yt_fetcher && docker compose up -d --build
 
-# Frontend SSG: собрать локально (нужен API с sys_name), залить .output/public → frontend/dist/
-# Не затирать channel_logo/ и wordstat_img/; empty.png и остальной static — да.
-# nginx: try_files $uri $uri/ $uri/index.html =404;
+# Frontend SSG: собрать локально, залить .output/public → site/
+# media/ не трогать
 ```
 
 ## Локально: poetry groups (`yt_fetcher`)

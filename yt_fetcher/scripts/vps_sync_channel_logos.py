@@ -10,7 +10,7 @@ import sys
 import urllib.request
 from pathlib import Path
 
-REMOTE_DIR = Path("/var/www/o2t4/backend/YTRatings/frontend/dist/channel_logo")
+REMOTE_DIR = Path("/var/www/o2t4/backend/YTRatings/media/channel_logo")
 MIN_BYTES = 100
 
 

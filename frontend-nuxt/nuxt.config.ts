@@ -1,5 +1,5 @@
-import { writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { createReadStream, existsSync, statSync, writeFileSync } from 'node:fs'
+import { dirname, extname, join, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineNuxtConfig } from 'nuxt/config'
 
@@ -10,6 +10,7 @@ const SITE_URL = (
 ).replace(/\/$/, '')
 
 const rootDir = dirname(fileURLToPath(import.meta.url))
+const mediaRoot = join(rootDir, '..', 'media')
 
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url)
@@ -198,6 +199,41 @@ export default defineNuxtConfig({
   },
 
   vite: {
+    plugins: [
+      {
+        name: 'ytr-serve-media',
+        configureServer(server) {
+          // Generated assets live in ../media — not copied into SSG output.
+          const mime: Record<string, string> = {
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.png': 'image/png',
+            '.svg': 'image/svg+xml',
+            '.webp': 'image/webp',
+          }
+          for (const [urlBase, dirName] of [
+            ['/channel_logo', 'channel_logo'],
+            ['/wordstat_img', 'wordstat_img'],
+          ] as const) {
+            server.middlewares.use(urlBase, (req, res, next) => {
+              try {
+                const rel = decodeURIComponent((req.url || '/').split('?')[0] || '/')
+                const file = normalize(join(mediaRoot, dirName, rel))
+                const root = normalize(join(mediaRoot, dirName))
+                if (!file.startsWith(root) || !existsSync(file) || !statSync(file).isFile()) {
+                  return next()
+                }
+                res.setHeader('Content-Type', mime[extname(file).toLowerCase()] || 'application/octet-stream')
+                res.setHeader('Cache-Control', 'public, max-age=86400')
+                createReadStream(file).pipe(res)
+              } catch {
+                next()
+              }
+            })
+          }
+        },
+      },
+    ],
     server: {
       proxy: {
         '/api': {

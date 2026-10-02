@@ -35,10 +35,12 @@ npm run generate     # ~N HTML = активные категории + /404 + si
 - `.output/public/404.html` (копия `404/index.html`) для nginx
 
 Нужен `NUXT_API_BASE` с `sys_name` (локальный API или задеплоенный бэкенд).  
-Артефакт: `.output/public/` → nginx. Node на VPS не нужен.
+Артефакт: `.output/public/` → `site/` → nginx. Node на VPS не нужен.  
+Логотипы / wordstat — `../media/` (vite middleware в dev; nginx alias на проде).
 
 ## Прод
 
 - `NUXT_PUBLIC_API_BASE=/api/ytr/v2` (same-origin)
-- после месячного ETL: снова `npm run generate` + залить статику
-- nginx: `error_page 404 /404.html;` (и желательно `try_files $uri $uri/ $uri.html /404.html;`)
+- после месячного ETL: снова `npm run generate` + залить `site/`
+- nginx: `root …/site/`; `/channel_logo/` + `/wordstat_img/` → `media/`
+- `error_page 404 /404.html;` + `try_files $uri $uri/ $uri.html $uri/index.html =404;`

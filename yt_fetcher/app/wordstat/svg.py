@@ -22,17 +22,15 @@ DEFAULT_SIZE = (800, 420)
 
 
 def default_out_dir() -> Path:
-    """Live nginx dir on VPS if present; else Nuxt public (gitignored, like channel_logo).
+    """Generated SVGs under media/wordstat_img (nginx alias /wordstat_img/).
 
-    Override: WORDSTAT_OUT_DIR=/var/www/.../frontend/dist/wordstat_img
+    Override: WORDSTAT_OUT_DIR or YTR_MEDIA_ROOT.
     """
-    if env := os.environ.get("WORDSTAT_OUT_DIR"):
-        return Path(env)
-    repo = Path(__file__).resolve().parents[3]
-    dist = repo / "frontend" / "dist" / "wordstat_img"
-    if dist.parent.is_dir():
-        return dist
-    return repo / "frontend-nuxt" / "public" / "wordstat_img"
+    from app.media_paths import wordstat_img_dir
+
+    out = wordstat_img_dir()
+    out.mkdir(parents=True, exist_ok=True)
+    return out
 
 
 def svg_filename(category_id: int, period: date | Period | str) -> str:

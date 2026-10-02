@@ -5,7 +5,7 @@ from __future__ import annotations
 import struct
 from pathlib import Path
 
-DIR = Path("/var/www/o2t4/backend/YTRatings/frontend/dist/channel_logo")
+DIR = Path("/var/www/o2t4/backend/YTRatings/media/channel_logo")
 
 
 def jpeg_size(path: Path):

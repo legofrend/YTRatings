@@ -11,6 +11,3 @@ dist
 # regenerated on every `npm run generate` from categories API
 public/sitemap.xml
 public/robots.txt
-# local / VPS static assets — not in git (live under frontend/dist on VPS)
-public/channel_logo
-public/wordstat_img

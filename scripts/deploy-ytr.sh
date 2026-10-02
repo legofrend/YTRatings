@@ -59,7 +59,7 @@ if [[ "$SKIP_PUSH" -eq 0 ]]; then
   git push -u origin HEAD
 fi
 
-DIST_LOCAL="$ROOT/frontend/dist"
+SITE_LOCAL="$ROOT/site"
 SSG_OUT="$ROOT/frontend-nuxt/.output/public"
 
 if [[ "$SKIP_GENERATE" -eq 0 ]]; then
@@ -74,17 +74,13 @@ if [[ "$SKIP_GENERATE" -eq 0 ]]; then
   )
   [[ -d "$SSG_OUT" ]] || { echo "SSG output missing: $SSG_OUT"; exit 1; }
 
-  step "Mirror SSG → frontend/dist (keep channel_logo/ + wordstat_img/)"
-  mkdir -p "$DIST_LOCAL"
+  step "Mirror SSG → site/ (media/ separate — nginx aliases)"
+  mkdir -p "$SITE_LOCAL"
   if command -v rsync >/dev/null 2>&1; then
-    rsync -a --delete --exclude 'channel_logo/' --exclude 'wordstat_img/' "$SSG_OUT"/ "$DIST_LOCAL"/
+    rsync -a --delete "$SSG_OUT"/ "$SITE_LOCAL"/
   else
-    # portable fallback
-    find "$DIST_LOCAL" -mindepth 1 \
-      ! -path '*/channel_logo/*' ! -name 'channel_logo' \
-      ! -path '*/wordstat_img/*' ! -name 'wordstat_img' \
-      -exec rm -rf {} + 2>/dev/null || true
-    tar -C "$SSG_OUT" --exclude=channel_logo --exclude=wordstat_img -cf - . | tar -C "$DIST_LOCAL" -xf -
+    find "$SITE_LOCAL" -mindepth 1 -exec rm -rf {} + 2>/dev/null || true
+    tar -C "$SSG_OUT" -cf - . | tar -C "$SITE_LOCAL" -xf -
   fi
 fi
 
@@ -96,6 +92,7 @@ cd '$REMOTE_ROOT'
 git fetch origin
 git checkout '$BRANCH' || git checkout -B '$BRANCH' "origin/$BRANCH"
 git pull --ff-only origin '$BRANCH'
+mkdir -p media/channel_logo media/wordstat_img site
 cd yt_fetcher
 docker compose up -d --build
 docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
@@ -103,11 +100,11 @@ EOF
 fi
 
 if [[ "$SKIP_FRONTEND" -eq 0 ]]; then
-  [[ -d "$DIST_LOCAL" ]] || { echo "frontend/dist missing"; exit 1; }
-  step "Sync frontend/dist → VPS (exclude channel_logo/ + wordstat_img/)"
-  REMOTE_DIST="$REMOTE_ROOT/frontend/dist"
-  ssh "$REMOTE_HOST" "mkdir -p '$REMOTE_DIST'"
-  tar -C "$DIST_LOCAL" --exclude=channel_logo --exclude=wordstat_img -cf - . | ssh "$REMOTE_HOST" "tar -xf - -C '$REMOTE_DIST'"
+  [[ -d "$SITE_LOCAL" ]] || { echo "site/ missing"; exit 1; }
+  step "Sync site/ → VPS"
+  REMOTE_SITE="$REMOTE_ROOT/site"
+  ssh "$REMOTE_HOST" "mkdir -p '$REMOTE_SITE'"
+  tar -C "$SITE_LOCAL" -cf - . | ssh "$REMOTE_HOST" "tar -xf - -C '$REMOTE_SITE'"
   step "nginx reload"
   ssh "$REMOTE_HOST" "nginx -t && systemctl reload nginx" || echo "WARN: nginx reload failed"
 fi

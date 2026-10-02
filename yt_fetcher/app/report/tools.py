@@ -252,11 +252,9 @@ def gen_script(data: list[SChannel], tmpl_file: str, output_file: str):
 
 
 def save_thumbnails(channels: list[SChannel], output_dir: str = None):
+    from app.media_paths import channel_logo_dir
 
-    main_dir = (
-        output_dir
-        or r"C:\Users\eremi\Documents\4. Projects\2024-07 YTRatings\frontend\public\channel_logo"
-    )
+    main_dir = output_dir or str(channel_logo_dir())
     output_dir = main_dir + os.sep + "new"
     os.makedirs(output_dir, exist_ok=True)
     errors = []
