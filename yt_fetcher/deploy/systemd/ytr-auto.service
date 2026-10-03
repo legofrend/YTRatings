@@ -1,9 +1,0 @@
-[Unit]
-Description=YTRatings pipeline auto (close / harvest)
-After=network-online.target docker.service
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-WorkingDirectory=/var/www/o2t4/backend/YTRatings/yt_fetcher
-ExecStart=/var/www/o2t4/backend/YTRatings/yt_fetcher/scripts/run-auto-cron.sh

@@ -1,0 +1,57 @@
+# Month-close pipeline. Loaded by `python -m app.main auto` (priority over harvest).
+# State (step done/pending) lives in PG table pipeline_run — not in this file.
+#
+# when: only days 1..day_of_month_lte (UTC). After that auto skips close
+# even if pipeline_run has pending holes — finish those via manual CLI / auto --force.
+# period: previous_month → on Oct 1 UTC close September.
+# Timer: 1st 00:01 UTC + 1st 07:01 UTC (new quota). See deploy/systemd/ytr-auto.timer.
+#
+# Priority: finish category 1 end-to-end before other cats burn quota.
+# fetch-channel-stats is cheap → all cats first.
+# Final: video_stat denorm (safety) + build-rating → channel_rating product.
+# `fetch-videos` already chains duration + shorts-sync + apply-is-short.
+
+id: close
+
+when:
+  timezone: UTC
+  day_of_month_lte: 5
+
+period: previous_month
+
+steps:
+  # --- cheap: channel totals for every active channel missing this period ---
+  - id: channel_stat
+    cmd: fetch-channel-stats
+
+  # --- category 1 first (any priority) ---
+  - id: videos_cat1
+    cmd: fetch-videos
+    cats: [1]
+    priority_lte: null
+
+  - id: video_stat_cat1
+    cmd: fetch-video-stats
+    cats: [1]
+
+  # --- other categories ---
+  # existing videos without this period's row (before spending quota on fetch)
+  - id: video_stat_rest_existing
+    cmd: fetch-video-stats
+    cats_exclude: [1]
+
+  - id: videos_rest
+    cmd: fetch-videos
+    cats_exclude: [1]
+    priority_lte: null
+
+  - id: video_stat_rest_new
+    cmd: fetch-video-stats
+    cats_exclude: [1]
+
+  # --- product table for the whole period ---
+  - id: denorm_video
+    cmd: denorm
+
+  - id: build_rating
+    cmd: build-rating

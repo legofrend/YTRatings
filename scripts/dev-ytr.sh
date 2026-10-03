@@ -17,8 +17,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-FETCHER="$ROOT/yt_fetcher"
-FRONTEND="$ROOT/frontend-nuxt"
+FETCHER="$ROOT/apps/api"
+FRONTEND="$ROOT/apps/web"
 
 if [[ -x "$FETCHER/.venv/Scripts/python.exe" ]]; then
   PYTHON="$FETCHER/.venv/Scripts/python.exe"
@@ -37,16 +37,16 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 if [[ "$WEB_ONLY" -eq 0 ]]; then
-  [[ -n "$PYTHON" ]] || { echo "No venv. cd yt_fetcher && poetry install" >&2; exit 1; }
+  [[ -n "$PYTHON" ]] || { echo "No venv. cd apps/api && python -m venv .venv && poetry install --with ingest,dev" >&2; exit 1; }
   echo "FastAPI  http://127.0.0.1:5000/docs"
   (cd "$FETCHER" && "$PYTHON" -m uvicorn app.fast_api.main:app --host 127.0.0.1 --port 5000 --reload) &
   PIDS+=($!)
 fi
 
 if [[ "$API_ONLY" -eq 0 ]]; then
-  [[ -f "$FRONTEND/package.json" ]] || { echo "Missing frontend-nuxt" >&2; exit 1; }
+  [[ -f "$FRONTEND/package.json" ]] || { echo "Missing apps/web" >&2; exit 1; }
   if [[ ! -d "$FRONTEND/node_modules" ]]; then
-    echo "npm install (frontend-nuxt)..."
+    echo "npm install (apps/web)..."
     (cd "$FRONTEND" && npm install)
   fi
   echo "Nuxt     http://127.0.0.1:3000"

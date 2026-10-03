@@ -1,0 +1,9 @@
+[Unit]
+Description=YTRatings pipeline auto (close / harvest)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/projects/ytratings/apps/api
+ExecStart=/srv/projects/ytratings/deploy/systemd/run-auto.sh

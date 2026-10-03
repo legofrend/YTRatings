@@ -1,0 +1,3 @@
+# Category 1 (news) extra FTS stems. Merged with global stop_lexemes.txt on fill.
+г
+ганапольск

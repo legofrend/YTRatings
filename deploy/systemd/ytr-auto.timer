@@ -1,0 +1,19 @@
+[Unit]
+Description=Run ytr-auto.service on schedule (UTC)
+
+[Timer]
+# All times UTC. Month boundary = 00:00 UTC (= 03:00 Europe/Moscow).
+# Harvest: 11th, 20th, and last 3 days of month @ 05:00.
+# Close: 1st @ 00:01 (scenario window) + 1st @ 07:01 (new YT quota day).
+OnCalendar=*-*-11 05:00:00 UTC
+OnCalendar=*-*-20 05:00:00 UTC
+OnCalendar=*-*-~3 05:00:00 UTC
+OnCalendar=*-*-~2 05:00:00 UTC
+OnCalendar=*-*-~1 05:00:00 UTC
+OnCalendar=*-*-01 00:01:00 UTC
+OnCalendar=*-*-01 07:01:00 UTC
+AccuracySec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
