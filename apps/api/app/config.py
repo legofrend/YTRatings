@@ -41,14 +41,13 @@ class Settings(BaseSettings):
     OAI_API_KEY: str
     GOOGLE_SHEETS_API_KEY: str = ""
 
-    # BigQuery (optional until migration; auth via ADC or GOOGLE_APPLICATION_CREDENTIALS)
+    # BigQuery analytical warehouse sync only (PG → BQ via app.bq.sync).
+    # Auth via ADC or GOOGLE_APPLICATION_CREDENTIALS.
     BQ_PROJECT_ID: str | None = None
     BQ_DATASET: str | None = None
     # Prefer service-account JSON key for stable scripts (path outside repo).
     # If set, used instead of user ADC from `gcloud auth application-default login`.
     GOOGLE_APPLICATION_CREDENTIALS: str | None = None
-    # Where raw ingest (channel/video/stat) is written. report/FastAPI stay on Postgres.
-    RAW_DB: Literal["postgres", "bigquery"] = "postgres"
 
     SECRET_KEY: str
     ALGORITHM: str

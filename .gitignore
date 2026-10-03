@@ -8,6 +8,7 @@
 /media/**
 !/media/README.md
 /apps/api/logs/
+/apps/api/scratch/
 /bar_race/
 # leftovers of the pre-apps/ layout (local venv/logs only)
 /yt_fetcher/

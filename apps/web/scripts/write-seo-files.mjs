@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const API_BASE =
-  process.env.NUXT_API_BASE || 'http://127.0.0.1:5000/api/ytr/v2'
+  process.env.NUXT_API_BASE || 'http://127.0.0.1:5000/api/ytr'
 const SITE_URL = (
   process.env.NUXT_PUBLIC_SITE_URL || 'https://ytr.o2t4.ru'
 ).replace(/\/$/, '')

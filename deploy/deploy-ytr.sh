@@ -8,8 +8,8 @@ set -euo pipefail
 
 COMMIT_MSG=""
 REMOTE_HOST="${REMOTE_HOST:-root@o2t4.ru}"
-REMOTE_ROOT="${REMOTE_ROOT:-/var/www/o2t4/backend/YTRatings}"
-API_BASE="${API_BASE:-https://ytr.o2t4.ru/api/ytr/v2}"
+REMOTE_ROOT="${REMOTE_ROOT:-/srv/projects/ytratings}"
+API_BASE="${API_BASE:-https://ytr.o2t4.ru/api/ytr}"
 SKIP_COMMIT=0
 SKIP_PUSH=0
 SKIP_GENERATE=0
@@ -45,9 +45,7 @@ if [[ "$SKIP_COMMIT" -eq 0 ]]; then
     step "git add + commit"
     git add -u
     git add deploy/deploy-ytr.ps1 deploy/deploy-ytr.sh \
-      apps/api/app/channel/edit_channels.py \
-      apps/api/scripts/channel_edits.example.csv \
-      apps/api/scripts/channel_edits.example.jsonl 2>/dev/null || true
+      apps/api/app/channel/edit_channels.py 2>/dev/null || true
     git commit -m "$COMMIT_MSG"
   else
     echo "Nothing to commit."
@@ -67,7 +65,7 @@ if [[ "$SKIP_GENERATE" -eq 0 ]]; then
   (
     cd apps/web
     export NUXT_API_BASE="$API_BASE"
-    export NUXT_PUBLIC_API_BASE="/api/ytr/v2"
+    export NUXT_PUBLIC_API_BASE="/api/ytr"
     export NUXT_PUBLIC_SITE_URL="https://ytr.o2t4.ru"
     export NUXT_IGNORE_LOCK=1
     npm run generate

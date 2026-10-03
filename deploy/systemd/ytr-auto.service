@@ -5,5 +5,5 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=/var/www/o2t4/backend/YTRatings/apps/api
-ExecStart=/var/www/o2t4/backend/YTRatings/deploy/systemd/run-auto.sh
+WorkingDirectory=/srv/projects/ytratings/apps/api
+ExecStart=/srv/projects/ytratings/deploy/systemd/run-auto.sh

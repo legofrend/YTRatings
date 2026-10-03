@@ -1,19 +1,12 @@
 import time
 
-from fastapi import FastAPI, applications
+from fastapi import FastAPI, Request, applications
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
-
-from fastapi_cache import FastAPICache
-from fastapi_cache.backends.inmemory import InMemoryBackend
-from fastapi_cache.decorator import cache
-
-from starlette.requests import Request
+from fastapi.responses import RedirectResponse
 
 from app.logger import logger
-from app.report.dao import ReportDAO
-from app.fast_api.v2 import router as ytr_v2_router
-from contextlib import asynccontextmanager
+from app.fast_api.ytr import router as ytr_router
 
 
 def swagger_monkey_patch(*args, **kwargs):
@@ -21,21 +14,13 @@ def swagger_monkey_patch(*args, **kwargs):
         *args,
         **kwargs,
         swagger_js_url="https://cdn.staticfile.net/swagger-ui/5.1.0/swagger-ui-bundle.min.js",
-        swagger_css_url="https://cdn.staticfile.net/swagger-ui/5.1.0/swagger-ui.min.css"
+        swagger_css_url="https://cdn.staticfile.net/swagger-ui/5.1.0/swagger-ui.min.css",
     )
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Инициализация кэша
-    FastAPICache.init(InMemoryBackend())
-    yield  # Здесь можно выполнить код при завершении работы приложения
-    FastAPICache.clear()  # Очистка кэша (если требуется)
 
 
 applications.get_swagger_ui_html = swagger_monkey_patch
 
-app = FastAPI(title="End-Up API", version="0.1.0", root_path="/api", lifespan=lifespan)
+app = FastAPI(title="YTRatings API", version="1.0.0", root_path="/api")
 
 origins = [
     "http://localhost:8080",
@@ -53,7 +38,6 @@ origins = [
     "http://www.ytr.o2t4.ru",
     "https://www.ytr.o2t4.ru",
 ]
-# Разрешите все источники CORS, разрешите все методы, разрешите заголовки и разрешите с куки
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -68,20 +52,23 @@ app.add_middleware(
     ],
 )
 
-app.include_router(ytr_v2_router)
+app.include_router(ytr_router)
 
 
-# Эндпоинт для отдачи страницы index.html при заходе на домен
-@app.get("/ytr/report")
-@cache(expire=600)  # Кэшировать ответ на xxx секунд
-async def get_report(period: str, category_id: int):
-    return await ReportDAO.get(period, category_id)
+def _v2_redirect_url(path: str, request: Request) -> str:
+    # External URL includes root_path (/api); keep query string.
+    suffix = path.strip("/")
+    target = f"/api/ytr/{suffix}" if suffix else "/api/ytr"
+    if request.url.query:
+        target = f"{target}?{request.url.query}"
+    return target
 
 
-@app.get("/ytr/metadata")
-@cache(expire=3600)  # Кэшировать ответ на xxx секунд
-async def get_report():
-    return await ReportDAO.metadata()
+@app.api_route("/ytr/v2", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/ytr/v2/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+async def redirect_ytr_v2(request: Request, path: str = ""):
+    """Compat: old /ytr/v2/* → /ytr/* (308 preserves method)."""
+    return RedirectResponse(url=_v2_redirect_url(path, request), status_code=308)
 
 
 @app.middleware("http")
@@ -89,7 +76,6 @@ async def add_process_time_header(request: Request, call_next):
     start_time = time.time()
     response = await call_next(request)
     process_time = time.time() - start_time
-    # При подключении Prometheus + Grafana подобный лог не требуется
     logger.info("Request handling time", extra={"process_time": round(process_time, 4)})
     return response
 
@@ -98,11 +84,6 @@ if __name__ == "__main__":
     import uvicorn
     import os.path
     import sys
-
-    # print(os.getcwd())
-    # os.chdir("..")
-    # print(os.getcwd())
-    # exit(0)
 
     sys.path.append(
         os.path.join(os.path.dirname(os.path.realpath(__file__)), os.pardir)

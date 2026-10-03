@@ -1,4 +1,4 @@
-"""YTRatings API v2 — channel_stat / video_stat backed endpoints."""
+"""YTRatings API — channel_stat / video_stat backed endpoints."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Query
 from app.channel import CategoryDAO, ChannelStatDAO, VideoStatDAO
 from app.period import Period
 
-router = APIRouter(prefix="/ytr/v2", tags=["ytr-v2"])
+router = APIRouter(prefix="/ytr", tags=["ytr"])
 
 SEARCH_VIDEOS_CHANNEL_ID = "__search_videos__"
 SEARCH_VIDEOS_TITLE = "Видео"

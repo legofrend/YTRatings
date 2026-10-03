@@ -35,6 +35,7 @@ from app.bq.copy_tables import (
     _load_batch,
     _log_progress,
     _max_id,
+    _progress_finish,
     _row_to_bq,
 )
 from app.bq.create_tables import (
@@ -48,7 +49,12 @@ from app.bq.create_tables import (
 from app.period import Period
 
 # Default monthly push: stats + videos for the period
-DEFAULT_PERIOD_TABLES = ("video_stat", "channel_stat", "video")
+DEFAULT_PERIOD_TABLES = (
+    "video_stat",
+    "channel_stat",
+    "channel_rating",
+    "video",
+)
 
 
 @dataclass(frozen=True)
@@ -63,6 +69,9 @@ class TableSyncSpec:
 TABLE_SPECS: dict[str, TableSyncSpec] = {
     "video_stat": TableSyncSpec(period_col="report_period", category_via="channel"),
     "channel_stat": TableSyncSpec(period_col="report_period", category_via="channel"),
+    "channel_rating": TableSyncSpec(
+        period_col="report_period", category_via="self"
+    ),
     "video": TableSyncSpec(period_col="published_at_period", category_via="channel"),
     "playlist_shorts": TableSyncSpec(
         period_col="published_at_period", category_via="channel"
@@ -359,11 +368,11 @@ def sync_table(
             pg_conn.set_session(readonly=True)
 
     if copied == 0 and pg_total == 0:
-        print(f"\n    {table.name}: nothing to load")
+        print(f"    {table.name}: nothing to load")
 
     elapsed = time.perf_counter() - started
     rate = copied / elapsed if elapsed else 0
-    print()
+    _progress_finish()
     print(
         f"  {table.name}: synced {copied:,} rows in {_fmt_elapsed(elapsed)}"
         f" ({rate:,.0f} rows/s)"

@@ -12,8 +12,8 @@
 param(
   [string]$CommitMessage = "",
   [string]$RemoteHost = "root@o2t4.ru",
-  [string]$RemoteRoot = "/var/www/o2t4/backend/YTRatings",
-  [string]$ApiBase = "https://ytr.o2t4.ru/api/ytr/v2",
+  [string]$RemoteRoot = "/srv/projects/ytratings",
+  [string]$ApiBase = "https://ytr.o2t4.ru/api/ytr",
   [switch]$SkipCommit,
   [switch]$SkipPush,
   [switch]$SkipGenerate,
@@ -54,8 +54,6 @@ if (-not $SkipCommit) {
       deploy/deploy-ytr.ps1 `
       deploy/deploy-ytr.sh `
       apps/api/app/channel/edit_channels.py `
-      apps/api/scripts/channel_edits.example.csv `
-      apps/api/scripts/channel_edits.example.jsonl `
       2>$null
     git status -sb
     git commit -m $CommitMessage
@@ -81,7 +79,7 @@ if (-not $SkipGenerate) {
   Push-Location (Join-Path $RepoRoot "apps\web")
   try {
     $env:NUXT_API_BASE = $ApiBase
-    $env:NUXT_PUBLIC_API_BASE = "/api/ytr/v2"
+    $env:NUXT_PUBLIC_API_BASE = "/api/ytr"
     $env:NUXT_PUBLIC_SITE_URL = "https://ytr.o2t4.ru"
     $env:NUXT_IGNORE_LOCK = "1"
     npm run generate
@@ -131,4 +129,4 @@ if (-not $SkipFrontend) {
 
 Step "Done"
 Write-Host "Live: https://ytr.o2t4.ru/"
-Write-Host "API:  https://ytr.o2t4.ru/api/ytr/v2/categories"
+Write-Host "API:  https://ytr.o2t4.ru/api/ytr/categories"

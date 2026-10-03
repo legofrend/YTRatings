@@ -40,7 +40,7 @@ npm run generate     # ~N HTML = активные категории + /404 + si
 
 ## Прод
 
-- `NUXT_PUBLIC_API_BASE=/api/ytr/v2` (same-origin)
+- `NUXT_PUBLIC_API_BASE=/api/ytr` (same-origin)
 - после месячного ETL: снова `npm run generate` + залить `site/`
 - nginx: `root …/site/`; `/channel_logo/` + `/wordstat_img/` → `media/`
 - `error_page 404 /404.html;` + `try_files $uri $uri/ $uri.html $uri/index.html =404;`

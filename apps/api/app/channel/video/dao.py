@@ -1,13 +1,12 @@
 import asyncio
 from datetime import date, datetime, UTC
-from pathlib import Path
 import sys
 import time
 from sqlalchemy import text, select, or_, and_, bindparam
 
 from app.dao.base import BaseDAO
 from app.database import async_session_maker
-from app.logger import logger, save_errors, save_json_csv
+from app.logger import logger, save_errors
 from app.period.period import Period
 from app.config import settings
 
@@ -15,13 +14,7 @@ from app.config import settings
 
 from app.channel.video.models import Video, VideoStat
 from app.channel.models import ChannelStatus
-import csv
 import json
-import pickle
-
-
-def _raw_is_bq() -> bool:
-    return settings.RAW_DB == "bigquery"
 
 
 def _is_connection_error(exc: BaseException) -> bool:
@@ -44,68 +37,12 @@ def _is_connection_error(exc: BaseException) -> bool:
     return False
 
 
-def save_data_dump(data: dict, filename_prefix: str = "youtube_data_dump") -> str:
-    """Сохраняет данные в файл для последующего использования"""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    # Создаем папку для дампов если её нет
-    dump_dir = Path("data_dumps")
-    dump_dir.mkdir(exist_ok=True)
-
-    # Сохраняем в JSON (читаемо) и pickle (полная структура)
-    json_filename = dump_dir / f"{filename_prefix}_{timestamp}.json"
-    pickle_filename = dump_dir / f"{filename_prefix}_{timestamp}.pkl"
-
-    # JSON для читаемости
-    with open(json_filename, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False, default=str)
-
-    # Pickle для полной структуры данных
-    with open(pickle_filename, "wb") as f:
-        pickle.dump(data, f)
-
-    logger.info(f"✅ Данные сохранены в: {json_filename} и {pickle_filename}")
-
-    return str(pickle_filename)
-
-
-def load_data_dump(filename: str) -> dict:
-    """Загружает данные из дампа"""
-    try:
-        with open(filename, "rb") as f:
-            data = pickle.load(f)
-        logger.info(f"✅ Данные загружены из {filename}")
-        return data
-    except Exception as e:
-        logger.error(f"❌ Ошибка загрузки дампа: {e}")
-        return None
-
-
-def get_latest_dump(dump_prefix: str = "video_list_dump") -> str:
-    """Находит последний дамп по префиксу"""
-    dump_dir = Path("data_dumps")
-    if not dump_dir.exists():
-        return None
-
-    dump_files = list(dump_dir.glob(f"{dump_prefix}_*.pkl"))
-    if not dump_files:
-        return None
-
-    latest_dump = max(dump_files, key=lambda x: x.stat().st_mtime)
-    return str(latest_dump)
-
-
 class VideoDAO(BaseDAO):
     model = Video
     gid = "video_id"
 
     @classmethod
     async def get_ids(cls, filters: dict = {}):
-        if _raw_is_bq():
-            from app.channel.video.dao_bq import VideoBqDAO
-
-            return await VideoBqDAO.get_ids(filters)
-
         async with async_session_maker() as session:
             query = select(cls.model.video_id).filter_by(**filters)
             result = await session.execute(query)
@@ -113,67 +50,116 @@ class VideoDAO(BaseDAO):
 
     @classmethod
     async def add_update_bulk(cls, data, do_nothing: bool = False):
-        if _raw_is_bq():
-            from app.channel.video.dao_bq import VideoBqDAO
-
-            return await VideoBqDAO.add_update_bulk(data, do_nothing=do_nothing)
         return await super().add_update_bulk(data, do_nothing=do_nothing)
 
     @classmethod
     async def update_bulk(cls, data: list[dict], identifier: str = None) -> bool:
-        if _raw_is_bq():
-            from app.channel.video.dao_bq import VideoBqDAO
-
-            return await VideoBqDAO.update_bulk(
-                data, identifier=identifier or cls.gid
-            )
         return await super().update_bulk(data, identifier=identifier)
 
+    @classmethod
+    async def _stat_candidates(
+        cls,
+        *,
+        report_period: Period,
+        published_at_period: Period | None = None,
+        category_id: int | None = None,
+        only_missing: bool = True,
+        video_ids: list[str] | None = None,
+    ) -> list[dict]:
+        """Candidates for video_stat ingest with denorm meta + prev-period counts.
+
+        Returns rows: video_id, channel_id, published_at_period, is_short,
+        prev_view_count / prev_like_count / prev_comment_count (NULL if no prev).
+
+        video_ids: explicit ids skip channel/status/period filters (meta lookup only).
+        """
+        prev_period = report_period.next(-1)
+        params: dict = {"prev_period": prev_period}
+        joins = [
+            """LEFT JOIN video_stat AS prev
+                   ON prev.video_id = v.video_id
+                  AND prev.report_period = :prev_period""",
+        ]
+
+        if video_ids is not None:
+            # Explicit list: no ACTIVE / published window — same as old update_stat path
+            params["video_ids"] = list(video_ids)
+            where = ["v.video_id = ANY(:video_ids)"]
+            order_sql = "video_id"
+            priority_col = "NULL::int AS priority"
+        else:
+            if not published_at_period:
+                published_at_period = report_period.next(-3)
+            params["report_period"] = report_period
+            params["published_at_period"] = published_at_period
+            joins.insert(
+                0, "LEFT JOIN channel AS c ON c.channel_id = v.channel_id"
+            )
+            where = [
+                "v.published_at_period >= :published_at_period",
+                f"c.status = {ChannelStatus.ACTIVE}",
+                "v.status = 1",
+            ]
+            if only_missing:
+                joins.append(
+                    """LEFT JOIN video_stat AS vs
+                           ON v.video_id = vs.video_id
+                          AND vs.report_period = :report_period"""
+                )
+                where.append("vs.id IS NULL")
+            if category_id:
+                where.append("c.category_id = :category_id")
+                params["category_id"] = category_id
+            order_sql = (
+                "priority ASC NULLS LAST, "
+                "published_at_period DESC NULLS LAST, "
+                "video_id"
+            )
+            priority_col = "c.priority"
+
+        query = text(
+            f"""
+            SELECT
+                video_id,
+                channel_id,
+                published_at_period,
+                is_short,
+                prev_view_count,
+                prev_like_count,
+                prev_comment_count
+            FROM (
+                SELECT DISTINCT
+                    v.video_id,
+                    v.channel_id,
+                    v.published_at_period,
+                    v.is_short,
+                    {priority_col},
+                    prev.view_count AS prev_view_count,
+                    prev.like_count AS prev_like_count,
+                    prev.comment_count AS prev_comment_count
+                FROM video AS v
+                {" ".join(joins)}
+                WHERE {" AND ".join(where)}
+            ) AS sub
+            ORDER BY {order_sql}
+            """
+        )
+        async with async_session_maker() as session:
+            result = await session.execute(query, params)
+            return [dict(row) for row in result.mappings().all()]
     @classmethod
     async def get_ids_for_stat(
         cls,
         report_period: Period,
         published_at_period: Period = None,
         category_id: int = None,
-    ):
-        if _raw_is_bq():
-            from app.channel.video.dao_bq import VideoStatBqDAO
-
-            return await VideoStatBqDAO.get_ids_for_stat(
-                report_period=report_period,
-                published_at_period=published_at_period,
-                category_id=category_id,
-            )
-
-        if not published_at_period:
-            published_at_period = report_period.next(-3)
-
-        async with async_session_maker() as session:
-            query = f"""
-                SELECT video_id FROM (
-                    SELECT DISTINCT
-                        v.video_id,
-                        c.priority,
-                        v.published_at_period
-                    FROM video AS v
-                    LEFT JOIN channel AS c ON c.channel_id = v.channel_id
-                    WHERE v.published_at_period >= '{published_at_period.strf()}'
-                      AND c.status = {ChannelStatus.ACTIVE}
-                      AND v.status = 1
-            """
-            if category_id:
-                query += f" AND c.category_id = {category_id}"
-            query += """
-                ) AS sub
-                ORDER BY
-                    priority ASC NULLS LAST,
-                    published_at_period DESC NULLS LAST,
-                    video_id
-            """
-            query = text(query)
-            result = await session.execute(query)
-            data = result.mappings().all()
-            return [item["video_id"] for item in data]
+    ) -> list[dict]:
+        return await cls._stat_candidates(
+            report_period=report_period,
+            published_at_period=published_at_period,
+            category_id=category_id,
+            only_missing=False,
+        )
 
     @classmethod
     async def get_ids_wo_stat(
@@ -181,51 +167,13 @@ class VideoDAO(BaseDAO):
         report_period: Period,
         published_at_period: Period = None,
         category_id: int = None,
-    ):
-        if _raw_is_bq():
-            from app.channel.video.dao_bq import VideoStatBqDAO
-
-            return await VideoStatBqDAO.get_ids_wo_stat(
-                report_period=report_period,
-                published_at_period=published_at_period,
-                category_id=category_id,
-            )
-
-        if not published_at_period:
-            published_at_period = report_period.next(-3)
-
-        async with async_session_maker() as session:
-            query = f"""
-                SELECT video_id FROM (
-                    SELECT DISTINCT
-                        v.video_id,
-                        c.priority,
-                        v.published_at_period
-                    FROM video AS v
-                    LEFT JOIN channel AS c ON c.channel_id = v.channel_id
-                    LEFT JOIN video_stat AS vs
-                        ON v.video_id = vs.video_id
-                       AND vs.report_period = '{report_period.strf()}'
-                    WHERE vs.id IS NULL
-                      AND v.published_at_period >= '{published_at_period.strf()}'
-                      AND c.status = {ChannelStatus.ACTIVE}
-                      AND v.status = 1
-            """
-            if category_id:
-                query += f" AND c.category_id = {category_id}"
-            query += """
-                ) AS sub
-                ORDER BY
-                    priority ASC NULLS LAST,
-                    published_at_period DESC NULLS LAST,
-                    video_id
-            """
-            query = text(query)
-            result = await session.execute(query)
-            data = result.mappings().all()
-            data = [item["video_id"] for item in data]
-            return data
-
+    ) -> list[dict]:
+        return await cls._stat_candidates(
+            report_period=report_period,
+            published_at_period=published_at_period,
+            category_id=category_id,
+            only_missing=True,
+        )
     @classmethod
     async def get_ids_wo_duration(
         cls,
@@ -240,16 +188,6 @@ class VideoDAO(BaseDAO):
         """
         if isinstance(category_ids, int):
             category_ids = [category_ids]
-
-        if _raw_is_bq():
-            # BQ path: fall back to generic null-duration ids (no cat filter yet)
-            ids = await cls.get_ids(filters={"duration": None, "status": 1})
-            if after_id:
-                ids = [i for i in ids if i > after_id]
-            ids.sort()
-            if limit is not None:
-                ids = ids[: max(0, int(limit))]
-            return ids
 
         params: dict = {}
         where = ["v.status = 1", "v.duration IS NULL"]
@@ -285,11 +223,6 @@ class VideoDAO(BaseDAO):
         cls,
         category_id: int = None,
     ):
-        if _raw_is_bq():
-            from app.channel.video.dao_bq import VideoBqDAO
-
-            return await VideoBqDAO.get_ids_wo_is_short(category_id=category_id)
-
         async with async_session_maker() as session:
             query = f"""select v.video_id
                         from video as v
@@ -651,65 +584,6 @@ class VideoDAO(BaseDAO):
         }
 
     @classmethod
-    async def update_is_short_http_old(
-        cls, video_list: list[str] = None, from_file: str = None
-    ):
-        """LEGACY HTTP is_short. Do not use — prefer update_is_short_new / apply-is-short."""
-        import app.api.ytapi as yt
-
-        if not video_list:
-            if from_file:
-                with open(from_file, mode="r", encoding="utf-8") as file:
-                    csv_reader = csv.DictReader(
-                        file, delimiter="\t"
-                    )  # используем табуляцию как разделитель
-                    video_list = [
-                        {
-                            "video_id": row["video_id"],
-                            "is_short": (
-                                row["is_short"].strip().lower() == "true"
-                                if row.get("is_short") and str(row["is_short"]).strip()
-                                else None
-                            ),
-                        }
-                        for row in csv_reader
-                    ]
-            else:
-                video_list = await cls.get_ids_wo_is_short()
-                # res = await cls.find_all(is_short=None, status=1)
-                if not video_list:
-                    return None
-            logger.info(f"Found videos without is_short: {len(video_list)}")
-
-        try:
-            await yt.check_shorts_http_old(video_list)
-            logger.info(f"Fetched info about videos: {len(video_list)}")
-            try:
-                filename = "logs/list_filled.csv"
-                save_json_csv(video_list, filename)
-            except Exception as e:
-                with open(filename, "w", encoding="utf-8") as file:
-                    file.write(str(video_list))
-
-            ok = await cls.update_bulk(video_list)
-            if not ok:
-                logger.error(
-                    f"Partial/failed is_short bulk update for {len(video_list)} videos"
-                )
-        except Exception:
-            logger.error("Can't update video is_short (HTTP legacy)", exc_info=True)
-            save_errors(video_list, "video_detail")
-
-        return video_list
-
-    @classmethod
-    async def update_is_short(cls, *args, **kwargs):
-        raise RuntimeError(
-            "VideoDAO.update_is_short (HTTP) is disabled; use update_is_short_new "
-            "or `python -m app.main apply-is-short`. Legacy: update_is_short_http_old"
-        )
-
-    @classmethod
     async def get_from_playlist(
         cls,
         id: str,
@@ -772,7 +646,7 @@ class VideoDAO(BaseDAO):
         cls, channel_ids: list[str] = None, category_id: int = None
     ) -> None:
         from app.media_paths import video_gen_dir
-        from app.report.tools import download_file
+        from app.utils.download import download_file
         import os
 
         workdir = str(video_gen_dir() / "channel_logo" / str(category_id))
@@ -831,10 +705,6 @@ class VideoStatDAO(BaseDAO):
 
     @classmethod
     async def add_bulk(cls, data: list[dict]) -> list | bool:
-        if _raw_is_bq():
-            from app.channel.video.dao_bq import VideoStatBqDAO
-
-            return await VideoStatBqDAO.add_bulk(data)
         return await super().add_bulk(data)
 
     @classmethod
@@ -1190,7 +1060,7 @@ class VideoStatDAO(BaseDAO):
         """
         Fill NULL denorm cols on video_stat: build staging → UPDATE in batches.
 
-        MoM / is_new / is_short match video_stat_change (sql/views.sql), joins
+        MoM / is_new / is_short match video_stat_change (see sql/schema.sql views), joins
         inlined + scoped (no view). Staging is UNLOGGED (not TEMP) so rebuild
         survives connection drops; UPDATE commits every batch_size rows.
 
@@ -1334,6 +1204,43 @@ class VideoStatDAO(BaseDAO):
         )
         return total
 
+    @staticmethod
+    def _apply_video_stat_denorm(
+        item: dict,
+        meta: dict,
+        report_period: Period,
+    ) -> None:
+        """Fill denorm cols on a raw YT video_stat row (mutates item).
+
+        MoM / is_new / is_short match VideoStatDAO.backfill_denorm / video_stat_change.
+        """
+        item["report_period"] = report_period
+        item["channel_id"] = meta.get("channel_id")
+        # Match backfill CASE WHEN v.is_short THEN TRUE ELSE FALSE END (NULL → False)
+        item["is_short"] = bool(meta.get("is_short"))
+        is_new = meta.get("published_at_period") == report_period
+        item["is_new"] = is_new
+
+        view_count = int(item.get("view_count") or 0)
+        like_count = int(item.get("like_count") or 0)
+        comment_count = int(item.get("comment_count") or 0)
+        prev_view = meta.get("prev_view_count")
+        prev_like = meta.get("prev_like_count")
+        prev_comment = meta.get("prev_comment_count")
+
+        if prev_view is not None:
+            item["period_view_count"] = view_count - int(prev_view)
+            item["period_like_count"] = like_count - int(prev_like or 0)
+            item["period_comment_count"] = comment_count - int(prev_comment or 0)
+        elif is_new:
+            item["period_view_count"] = view_count
+            item["period_like_count"] = like_count
+            item["period_comment_count"] = comment_count
+        else:
+            item["period_view_count"] = 0
+            item["period_like_count"] = 0
+            item["period_comment_count"] = 0
+
     @classmethod
     async def update_stat(
         cls,
@@ -1345,6 +1252,8 @@ class VideoStatDAO(BaseDAO):
     ):
         if isinstance(category_ids, int):
             category_ids = [category_ids]
+        if isinstance(video_ids, str):
+            video_ids = [video_ids]
 
         # If video_ids provided, use single category_id=0 to skip category filtering
         if video_ids:
@@ -1353,10 +1262,16 @@ class VideoStatDAO(BaseDAO):
         total_updated = 0
         for i, category_id in enumerate(category_ids, start=1):
             logger.info(f"Processing category {category_id} {i}/{len(category_ids)}")
-            current_video_ids = (
-                video_ids
-                if video_ids
-                else await (
+            if video_ids:
+                candidates = await VideoDAO._stat_candidates(
+                    report_period=report_period,
+                    video_ids=video_ids,
+                    only_missing=False,
+                )
+                meta_by_id = {c["video_id"]: c for c in candidates}
+                current_video_ids = list(video_ids)
+            else:
+                candidates = await (
                     VideoDAO.get_ids_for_stat(
                         report_period=report_period, category_id=category_id
                     )
@@ -1365,8 +1280,9 @@ class VideoStatDAO(BaseDAO):
                         report_period=report_period, category_id=category_id
                     )
                 )
-            )
-            label = "videos" if force else "videos without stat"
+                meta_by_id = {c["video_id"]: c for c in candidates}
+                current_video_ids = list(meta_by_id)
+            label = "videos" if force or video_ids else "videos without stat"
             logger.info(f"Found {len(current_video_ids)} {label}")
             if not current_video_ids:
                 continue
@@ -1375,7 +1291,6 @@ class VideoStatDAO(BaseDAO):
             from app.api import yt_pending
 
             data = yt.video_list(current_video_ids, obj_type="stat")
-            # data = []
             logger.info(f"Fetched video stats: {len(data)}")
 
             if data:
@@ -1394,7 +1309,11 @@ class VideoStatDAO(BaseDAO):
                     )
 
                 for item in data:
-                    item["report_period"] = report_period
+                    m = meta_by_id.get(item["video_id"])
+                    if m:
+                        cls._apply_video_stat_denorm(item, m, report_period)
+                    else:
+                        item["report_period"] = report_period
                 period_key = (
                     report_period.strftime("%Y-%m")
                     if hasattr(report_period, "strftime")
@@ -1417,5 +1336,3 @@ class VideoStatDAO(BaseDAO):
 
 
 # print("OK")
-
-# save_data_dump({"a": 1, "test": 2}, "video_list_dump")

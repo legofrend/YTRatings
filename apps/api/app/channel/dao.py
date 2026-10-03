@@ -9,21 +9,21 @@ from sqlalchemy import text, select, or_, and_, func, case
 from app.dao.base import BaseDAO
 from app.database import async_session_maker
 from app.logger import logger, save_errors
-from app.channel.models import Channel, ChannelStat, ChannelStatus
+from app.channel.models import (
+    Channel,
+    ChannelRating,
+    ChannelStat,
+    ChannelStatus,
+)
 from app.channel.category.models import Category
 from app.channel.video.dao import VideoDAO
-from app.config import settings
 from app.period import Period
 
 # ytapi is imported lazily inside YouTube-calling methods (FastAPI image has no ingest deps)
 
 
-def _raw_is_bq() -> bool:
-    return settings.RAW_DB == "bigquery"
-
-
 def _naive_utc(dt: datetime) -> datetime:
-    """BQ TIMESTAMP is tz-aware; PG/YouTube datetimes are naive UTC."""
+    """Normalize tz-aware datetimes to naive UTC (PG/YouTube store naive UTC)."""
     if dt.tzinfo is not None:
         return dt.astimezone(UTC).replace(tzinfo=None)
     return dt
@@ -35,11 +35,6 @@ class ChannelDAO(BaseDAO):
 
     @classmethod
     async def get_ids(cls, filters: dict = {}):
-        if _raw_is_bq():
-            from app.channel.dao_bq import ChannelBqDAO
-
-            return await ChannelBqDAO.get_ids(filters)
-
         # if not "status" in filters.keys():
         #     filters["status"] = ChannelStatus.ACTIVE
         data = await cls.find_all(**filters)
@@ -48,18 +43,10 @@ class ChannelDAO(BaseDAO):
 
     @classmethod
     async def add_update_bulk(cls, data, do_nothing: bool = False):
-        if _raw_is_bq():
-            from app.channel.dao_bq import ChannelBqDAO
-
-            return await ChannelBqDAO.add_update_bulk(data, do_nothing=do_nothing)
         return await super().add_update_bulk(data, do_nothing=do_nothing)
 
     @classmethod
     async def update(cls, filter: dict, data: dict):
-        if _raw_is_bq():
-            from app.channel.dao_bq import ChannelBqDAO
-
-            return await ChannelBqDAO.update(filter, data)
         return await super().update(filter, data)
 
     @classmethod
@@ -68,13 +55,6 @@ class ChannelDAO(BaseDAO):
         report_period: Period,
         category_id: int = None,
     ):
-        if _raw_is_bq():
-            from app.channel.dao_bq import ChannelStatBqDAO
-
-            return await ChannelStatBqDAO.get_ids_wo_stat(
-                report_period=report_period, category_id=category_id
-            )
-
         async with async_session_maker() as session:
             query = (
                 select(Channel.channel_id)
@@ -102,13 +82,6 @@ class ChannelDAO(BaseDAO):
         report_period: Period,
         category_id: int = None,
     ):
-        if _raw_is_bq():
-            from app.channel.dao_bq import ChannelBqDAO
-
-            return await ChannelBqDAO.get_ids_wo_video(
-                report_period=report_period, category_id=category_id
-            )
-
         # TODO replace with alchemy query
         query = f"""select c.channel_id
                     from channel as c
@@ -163,18 +136,6 @@ class ChannelDAO(BaseDAO):
         if not channel:
             return None
         return channel.get("channel_id")
-
-    @classmethod
-    async def add_channels(cls, names: list[str], category_id: int = None):
-        """Legacy: resolve by search.list (expensive). Prefer add_by_handles."""
-        channel_ids = []
-        for name in names:
-            await cls.search_channel(name, category_id=category_id)
-            # search_channel returns True; re-read by title is unreliable — skip ids
-        # Best-effort detail refresh for category
-        if category_id is not None:
-            await cls.update_detail(category_id=category_id)
-        return channel_ids
 
     @classmethod
     async def add_by_handles(
@@ -281,8 +242,6 @@ class ChannelDAO(BaseDAO):
         """
         if not rows:
             return True
-        if _raw_is_bq():
-            return await cls.add_update_bulk(rows, do_nothing=False)
 
         from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -478,16 +437,6 @@ class ChannelDAO(BaseDAO):
         Oldest / never-fetched first so fresh top channels don't burn quota
         before the long tail.
         """
-        if _raw_is_bq():
-            from app.channel.dao_bq import ChannelBqDAO
-
-            return await ChannelBqDAO.get_channels_to_fetch_videos(
-                category_id=category_id,
-                date_to=date_to,
-                priority=priority,
-                priority_gt=priority_gt,
-            )
-
         query = select(Channel.channel_id, Channel.last_video_fetch_dt).where(
             Channel.status == ChannelStatus.ACTIVE,
             or_(
@@ -636,8 +585,11 @@ class ChannelDAO(BaseDAO):
                 else:
                     date_from = None
 
-                # Don't claim Sept videos if we only ingested through Aug 31
-                fetch_marker = min(datetime.now(), period_end)
+                # Watermark in naive UTC (same as YouTube published_at). Cap at
+                # period_end so close after month-end does not claim next month.
+                fetch_marker = min(
+                    datetime.now(UTC).replace(tzinfo=None), period_end
+                )
 
                 try:
                     if is_cold:
@@ -721,7 +673,7 @@ class ChannelDAO(BaseDAO):
                 data = result.mappings().all()
                 return data
 
-        from app.report.tools import save_thumbnails
+        from app.utils.download import save_thumbnails
 
         channels = await get_channels()
         logger.info(f"Found {len(channels)} channels")
@@ -803,12 +755,12 @@ class ChannelDAO(BaseDAO):
         sql = f"""
         WITH best AS (
             SELECT
-                cs.channel_id,
-                MIN(cs.pv_score_rank) AS priority
-            FROM channel_stat AS cs
-            WHERE cs.report_period >= :oldest
-              AND cs.pv_score_rank IS NOT NULL
-            GROUP BY cs.channel_id
+                cr.channel_id,
+                MIN(cr.rank) AS priority
+            FROM channel_rating AS cr
+            WHERE cr.report_period >= :oldest
+              AND cr.rank IS NOT NULL
+            GROUP BY cr.channel_id
         ),
         target AS (
             SELECT c.channel_id
@@ -889,27 +841,21 @@ class ChannelStatDAO(BaseDAO):
 
     @classmethod
     async def add_bulk(cls, data: list[dict]) -> list | bool:
-        if _raw_is_bq():
-            from app.channel.dao_bq import ChannelStatBqDAO
-
-            return await ChannelStatBqDAO.add_bulk(data)
         return await super().add_bulk(data)
 
     @classmethod
     async def periods_for_category(cls, category_id: int) -> list[date]:
-        """Distinct report_periods that have channel_stat for channels in category."""
+        """Distinct report_periods with ranked channel_rating in category."""
         async with async_session_maker() as session:
             result = await session.execute(
-                select(ChannelStat.report_period)
-                .join(Channel, Channel.channel_id == ChannelStat.channel_id)
+                select(ChannelRating.report_period)
                 .where(
-                    Channel.category_id == category_id,
-                    Channel.status == ChannelStatus.ACTIVE,
-                    ChannelStat.report_period.is_not(None),
-                    ChannelStat.pv_score_rank.is_not(None),
+                    ChannelRating.category_id == category_id,
+                    ChannelRating.report_period.is_not(None),
+                    ChannelRating.rank.is_not(None),
                 )
                 .distinct()
-                .order_by(ChannelStat.report_period.desc())
+                .order_by(ChannelRating.report_period.desc())
             )
             return [row[0] for row in result.all()]
 
@@ -920,11 +866,11 @@ class ChannelStatDAO(BaseDAO):
 
     @classmethod
     async def latest_period_any(cls) -> date | None:
-        """Newest report_period that has any ranked channel_stat."""
+        """Newest report_period that has any ranked channel_rating."""
         async with async_session_maker() as session:
             result = await session.execute(
-                select(func.max(ChannelStat.report_period)).where(
-                    ChannelStat.pv_score_rank.is_not(None)
+                select(func.max(ChannelRating.report_period)).where(
+                    ChannelRating.rank.is_not(None)
                 )
             )
             return result.scalar_one_or_none()
@@ -939,24 +885,24 @@ class ChannelStatDAO(BaseDAO):
         """Fill missing channel_stat fields with 0; keep report_period."""
         zeros = {
             "rank": 0,
-            "rank_change": 0,
-            "pv_score": 0,
-            "pv_score_change": 0,
-            "pv_view": 0,
-            "pv_view_new_long": 0,
-            "pv_view_new_short": 0,
-            "pv_view_old_long": 0,
-            "pv_view_old_short": 0,
-            "pv_like": 0,
-            "pv_comment": 0,
-            "pv_video_long": 0,
-            "pv_video_short": 0,
-            "pv_duration": 0,
-            "subscriber_count": 0,
-            "pc_subscriber": 0,
-            "pc_view": 0,
-            "channel_view_count": 0,
-            "video_count": 0,
+            "rank_mom": 0,
+            "score": 0,
+            "score_mom": 0,
+            "video_views": 0,
+            "views_new_long": 0,
+            "views_new_short": 0,
+            "views_old_long": 0,
+            "views_old_short": 0,
+            "video_likes": 0,
+            "video_comments": 0,
+            "new_longs": 0,
+            "new_shorts": 0,
+            "duration_sec": 0,
+            "channel_subscribers": 0,
+            "channel_subscribers_mom": 0,
+            "channel_views_mom": 0,
+            "channel_views": 0,
+            "channel_videos": 0,
         }
         for k, v in zeros.items():
             if item.get(k) is None:
@@ -1000,45 +946,55 @@ class ChannelStatDAO(BaseDAO):
             result = await session.execute(
                 select(
                     Channel.channel_id,
-                    Channel.channel_title,
-                    Channel.description,
-                    Channel.custom_url,
-                    Channel.thumbnail_url,
-                    Channel.category_id,
+                    func.coalesce(
+                        ChannelRating.channel_title, Channel.channel_title
+                    ).label("channel_title"),
+                    func.coalesce(
+                        ChannelRating.description, Channel.description
+                    ).label("description"),
+                    func.coalesce(
+                        ChannelRating.custom_url, Channel.custom_url
+                    ).label("custom_url"),
+                    func.coalesce(
+                        ChannelRating.thumbnail_url, Channel.thumbnail_url
+                    ).label("thumbnail_url"),
+                    func.coalesce(
+                        ChannelRating.category_id, Channel.category_id
+                    ).label("category_id"),
                     Category.name.label("category_name"),
-                    ChannelStat.report_period,
-                    ChannelStat.pv_score_rank.label("rank"),
-                    ChannelStat.pv_score_rank_change.label("rank_change"),
-                    ChannelStat.pv_score,
-                    ChannelStat.pv_score_change,
-                    ChannelStat.pv_view,
-                    ChannelStat.pv_view_new_long,
-                    ChannelStat.pv_view_new_short,
-                    ChannelStat.pv_view_old_long,
-                    ChannelStat.pv_view_old_short,
-                    ChannelStat.pv_like,
-                    ChannelStat.pv_comment,
-                    ChannelStat.pv_video_long,
-                    ChannelStat.pv_video_short,
-                    ChannelStat.pv_duration,
-                    ChannelStat.subscriber_count,
-                    ChannelStat.pc_subscriber,
-                    ChannelStat.pc_view,
-                    ChannelStat.channel_view_count,
-                    ChannelStat.video_count,
+                    ChannelRating.report_period,
+                    ChannelRating.rank,
+                    ChannelRating.rank_mom,
+                    ChannelRating.score,
+                    ChannelRating.score_mom,
+                    ChannelRating.video_views,
+                    ChannelRating.views_new_long,
+                    ChannelRating.views_new_short,
+                    ChannelRating.views_old_long,
+                    ChannelRating.views_old_short,
+                    ChannelRating.video_likes,
+                    ChannelRating.video_comments,
+                    ChannelRating.new_longs,
+                    ChannelRating.new_shorts,
+                    ChannelRating.duration_sec,
+                    ChannelRating.channel_subscribers,
+                    ChannelRating.channel_subscribers_mom,
+                    ChannelRating.channel_views_mom,
+                    ChannelRating.channel_views,
+                    ChannelRating.channel_videos,
                 )
                 .outerjoin(Category, Category.id == Channel.category_id)
                 .outerjoin(
-                    ChannelStat,
+                    ChannelRating,
                     and_(
-                        ChannelStat.channel_id == Channel.channel_id,
-                        ChannelStat.report_period == report_period,
+                        ChannelRating.channel_id == Channel.channel_id,
+                        ChannelRating.report_period == report_period,
                     ),
                 )
                 .where(*where)
                 .order_by(
                     case((title_hit, 0), else_=1),
-                    ChannelStat.pv_score.desc().nullslast(),
+                    ChannelRating.score.desc().nullslast(),
                     Channel.channel_title.asc(),
                 )
                 .limit(limit)
@@ -1061,13 +1017,11 @@ class ChannelStatDAO(BaseDAO):
         async with async_session_maker() as session:
             result = await session.execute(
                 select(func.count())
-                .select_from(ChannelStat)
-                .join(Channel, Channel.channel_id == ChannelStat.channel_id)
+                .select_from(ChannelRating)
                 .where(
-                    Channel.category_id == category_id,
-                    Channel.status == ChannelStatus.ACTIVE,
-                    ChannelStat.report_period == report_period,
-                    ChannelStat.pv_score_rank.is_not(None),
+                    ChannelRating.category_id == category_id,
+                    ChannelRating.report_period == report_period,
+                    ChannelRating.rank.is_not(None),
                 )
             )
             return int(result.scalar_one() or 0)
@@ -1090,41 +1044,39 @@ class ChannelStatDAO(BaseDAO):
         async with async_session_maker() as session:
             result = await session.execute(
                 select(
-                    Channel.channel_id,
-                    Channel.channel_title,
-                    Channel.description,
-                    Channel.custom_url,
-                    Channel.thumbnail_url,
-                    Channel.category_id,
-                    ChannelStat.report_period,
-                    ChannelStat.pv_score_rank.label("rank"),
-                    ChannelStat.pv_score_rank_change.label("rank_change"),
-                    ChannelStat.pv_score,
-                    ChannelStat.pv_score_change,
-                    ChannelStat.pv_view,
-                    ChannelStat.pv_view_new_long,
-                    ChannelStat.pv_view_new_short,
-                    ChannelStat.pv_view_old_long,
-                    ChannelStat.pv_view_old_short,
-                    ChannelStat.pv_like,
-                    ChannelStat.pv_comment,
-                    ChannelStat.pv_video_long,
-                    ChannelStat.pv_video_short,
-                    ChannelStat.pv_duration,
-                    ChannelStat.subscriber_count,
-                    ChannelStat.pc_subscriber,
-                    ChannelStat.pc_view,
-                    ChannelStat.channel_view_count,
-                    ChannelStat.video_count,
+                    ChannelRating.channel_id,
+                    ChannelRating.channel_title,
+                    ChannelRating.description,
+                    ChannelRating.custom_url,
+                    ChannelRating.thumbnail_url,
+                    ChannelRating.category_id,
+                    ChannelRating.report_period,
+                    ChannelRating.rank,
+                    ChannelRating.rank_mom,
+                    ChannelRating.score,
+                    ChannelRating.score_mom,
+                    ChannelRating.video_views,
+                    ChannelRating.views_new_long,
+                    ChannelRating.views_new_short,
+                    ChannelRating.views_old_long,
+                    ChannelRating.views_old_short,
+                    ChannelRating.video_likes,
+                    ChannelRating.video_comments,
+                    ChannelRating.new_longs,
+                    ChannelRating.new_shorts,
+                    ChannelRating.duration_sec,
+                    ChannelRating.channel_subscribers,
+                    ChannelRating.channel_subscribers_mom,
+                    ChannelRating.channel_views_mom,
+                    ChannelRating.channel_views,
+                    ChannelRating.channel_videos,
                 )
-                .join(Channel, Channel.channel_id == ChannelStat.channel_id)
                 .where(
-                    Channel.category_id == category_id,
-                    Channel.status == ChannelStatus.ACTIVE,
-                    ChannelStat.report_period == report_period,
-                    ChannelStat.pv_score_rank.is_not(None),
+                    ChannelRating.category_id == category_id,
+                    ChannelRating.report_period == report_period,
+                    ChannelRating.rank.is_not(None),
                 )
-                .order_by(ChannelStat.pv_score_rank.asc())
+                .order_by(ChannelRating.rank.asc())
                 .offset(offset)
                 .limit(limit)
             )
@@ -1161,26 +1113,26 @@ class ChannelStatDAO(BaseDAO):
 
             result = await session.execute(
                 select(
-                    ChannelStat.report_period,
-                    ChannelStat.pv_score_rank.label("rank"),
-                    ChannelStat.pv_score_rank_change.label("rank_change"),
-                    ChannelStat.pv_score,
-                    ChannelStat.pv_score_change,
-                    ChannelStat.pv_view,
-                    ChannelStat.pv_view_new_long,
-                    ChannelStat.pv_view_old_long,
-                    ChannelStat.pv_view_new_short,
-                    ChannelStat.pv_view_old_short,
-                    ChannelStat.channel_view_count,
-                    ChannelStat.pc_view,
-                    ChannelStat.subscriber_count,
-                    ChannelStat.pc_subscriber,
+                    ChannelRating.report_period,
+                    ChannelRating.rank,
+                    ChannelRating.rank_mom,
+                    ChannelRating.score,
+                    ChannelRating.score_mom,
+                    ChannelRating.video_views,
+                    ChannelRating.views_new_long,
+                    ChannelRating.views_old_long,
+                    ChannelRating.views_new_short,
+                    ChannelRating.views_old_short,
+                    ChannelRating.channel_views,
+                    ChannelRating.channel_views_mom,
+                    ChannelRating.channel_subscribers,
+                    ChannelRating.channel_subscribers_mom,
                 )
                 .where(
-                    ChannelStat.channel_id == channel_id,
-                    ChannelStat.report_period.is_not(None),
+                    ChannelRating.channel_id == channel_id,
+                    ChannelRating.report_period.is_not(None),
                 )
-                .order_by(ChannelStat.report_period.desc())
+                .order_by(ChannelRating.report_period.desc())
                 .limit(months)
             )
             points = []
@@ -1219,22 +1171,20 @@ class ChannelStatDAO(BaseDAO):
         async with async_session_maker() as session:
             result = await session.execute(
                 select(
-                    ChannelStat.report_period,
-                    ChannelStat.pv_score,
-                    ChannelStat.pv_view_new_long,
-                    ChannelStat.pv_view_old_long,
-                    ChannelStat.pv_view_new_short,
-                    ChannelStat.pv_view_old_short,
-                    ChannelStat.pv_view,
+                    ChannelRating.report_period,
+                    ChannelRating.score,
+                    ChannelRating.views_new_long,
+                    ChannelRating.views_old_long,
+                    ChannelRating.views_new_short,
+                    ChannelRating.views_old_short,
+                    ChannelRating.video_views,
                 )
-                .join(Channel, Channel.channel_id == ChannelStat.channel_id)
                 .where(
-                    Channel.category_id == category_id,
-                    Channel.status == ChannelStatus.ACTIVE,
-                    ChannelStat.report_period >= oldest,
-                    ChannelStat.report_period.is_not(None),
-                    ChannelStat.pv_score_rank.is_not(None),
-                    ChannelStat.pv_score_rank <= limit,
+                    ChannelRating.category_id == category_id,
+                    ChannelRating.report_period >= oldest,
+                    ChannelRating.report_period.is_not(None),
+                    ChannelRating.rank.is_not(None),
+                    ChannelRating.rank <= limit,
                 )
             )
             buckets: dict[date, dict] = {}
@@ -1244,20 +1194,20 @@ class ChannelStatDAO(BaseDAO):
                     rp,
                     {
                         "report_period": rp,
-                        "pv_score": 0.0,
-                        "pv_view_new_long": 0.0,
-                        "pv_view_old_long": 0.0,
-                        "pv_view_new_short": 0.0,
-                        "pv_view_old_short": 0.0,
-                        "pv_view": 0.0,
+                        "score": 0.0,
+                        "views_new_long": 0.0,
+                        "views_old_long": 0.0,
+                        "views_new_short": 0.0,
+                        "views_old_short": 0.0,
+                        "video_views": 0.0,
                     },
                 )
-                b["pv_score"] += float(row["pv_score"] or 0)
-                b["pv_view_new_long"] += float(row["pv_view_new_long"] or 0)
-                b["pv_view_old_long"] += float(row["pv_view_old_long"] or 0)
-                b["pv_view_new_short"] += float(row["pv_view_new_short"] or 0)
-                b["pv_view_old_short"] += float(row["pv_view_old_short"] or 0)
-                b["pv_view"] += float(row["pv_view"] or 0)
+                b["score"] += float(row["score"] or 0)
+                b["views_new_long"] += float(row["views_new_long"] or 0)
+                b["views_old_long"] += float(row["views_old_long"] or 0)
+                b["views_new_short"] += float(row["views_new_short"] or 0)
+                b["views_old_short"] += float(row["views_old_short"] or 0)
+                b["video_views"] += float(row["video_views"] or 0)
 
             points = []
             for rp in sorted(window):
@@ -1344,97 +1294,86 @@ class ChannelStatDAO(BaseDAO):
         logger.info(f"Total updated channels: {total_updated}")
         return total_updated
 
+
+class ChannelRatingDAO(BaseDAO):
+    model = ChannelRating
+
     @classmethod
-    async def backfill_denorm(
+    async def build_rating(
         cls,
         *,
         report_period: date | Period,
     ) -> dict[str, int]:
         """
-        Fill channel_stat denorm cols for one report_period (views.sql steps 3–5).
+        Rebuild channel_rating for one report_period — full API product row.
 
-        1) pc_* / ppcs_id — MoM vs prev channel_stat
-        2) pv_* / pv_score_rank — aggregate video_stat (+ video.duration), rank by category
-        3) pv_score(_rank)_change — MoM vs prev (via ppcs_id)
-
-        Uses materialized video_stat.channel_id / is_short / is_new / period_*.
-        Unlike legacy step-4 SQL, joins video_stat on report_period too
-        (old join was channel_id only — wrong across months).
-
-        Overwrites denorm for the period (not NULL-only): safe after video_stat backfill.
+        Snapshots channel dims + channel_stat counts, computes channel_*_mom from
+        prev channel_stat, aggregates video_stat, ranks by category, MoM vs prev
+        channel_rating. Self-contained: API reads only this table.
         """
         if isinstance(report_period, Period):
             report_period = date(report_period.year, report_period.month, 1)
         params = {"report_period": report_period}
         t_all = time.monotonic()
-        stats: dict[str, int] = {}
 
-        # --- step 3: MoM channel totals ---
-        sql_pc = """
-            WITH updates AS (
+        sql = f"""
+            WITH cur AS (
                 SELECT
-                    cur.id,
-                    prev.id AS ppcs_id,
-                    cur.channel_view_count - COALESCE(prev.channel_view_count, 0)
-                        AS pc_view,
-                    cur.subscriber_count - COALESCE(prev.subscriber_count, 0)
-                        AS pc_subscriber,
-                    cur.video_count - COALESCE(prev.video_count, 0) AS pc_video
-                FROM channel_stat AS cur
-                LEFT JOIN channel_stat AS prev
-                    ON prev.report_period = cur.report_period - INTERVAL '1 month'
-                   AND prev.channel_id = cur.channel_id
-                WHERE cur.report_period = :report_period
-            )
-            UPDATE channel_stat AS cs
-            SET
-                ppcs_id = COALESCE(u.ppcs_id, 0),
-                pc_view = u.pc_view,
-                pc_subscriber = u.pc_subscriber,
-                pc_video = u.pc_video,
-                updated_at = CURRENT_TIMESTAMP
-            FROM updates u
-            WHERE cs.id = u.id
-        """
-
-        # --- step 4: from video_stat (+ duration) ---
-        # FIX: vs.report_period = c.report_period (legacy SQL missed this)
-        sql_pv = f"""
-            WITH channel_periods AS (
-                SELECT DISTINCT channel_id, report_period
+                    cs.channel_id,
+                    cs.report_period,
+                    cs.data_at AS stats_at,
+                    cs.channel_view_count AS channel_views,
+                    cs.subscriber_count AS channel_subscribers,
+                    cs.video_count AS channel_videos,
+                    ch.channel_title,
+                    ch.description,
+                    ch.custom_url,
+                    ch.thumbnail_url,
+                    ch.category_id
+                FROM channel_stat AS cs
+                JOIN channel AS ch ON ch.channel_id = cs.channel_id
+                WHERE cs.report_period = :report_period
+                  AND ch.status = {ChannelStatus.ACTIVE}
+            ),
+            prev_cs AS (
+                SELECT DISTINCT ON (channel_id)
+                    channel_id,
+                    channel_view_count AS channel_views,
+                    subscriber_count AS channel_subscribers,
+                    video_count AS channel_videos
                 FROM channel_stat
-                WHERE report_period = :report_period
+                WHERE report_period = (:report_period::date - INTERVAL '1 month')
+                ORDER BY channel_id, id DESC
             ),
             video_stats AS (
                 SELECT
                     c.channel_id,
                     c.report_period,
-                    SUM(CASE WHEN vs.is_new THEN 1 ELSE 0 END) AS pv_video,
                     SUM(CASE WHEN vs.is_new AND vs.is_short IS FALSE THEN 1 ELSE 0 END)
-                        AS pv_video_long,
+                        AS new_longs,
                     SUM(CASE WHEN vs.is_new AND vs.is_short THEN 1 ELSE 0 END)
-                        AS pv_video_short,
-                    COALESCE(SUM(vs.period_view_count), 0) AS pv_view,
+                        AS new_shorts,
+                    COALESCE(SUM(vs.period_view_count), 0) AS video_views,
                     SUM(CASE
                         WHEN vs.is_new AND vs.is_short IS FALSE
-                        THEN vs.period_view_count ELSE 0 END) AS pv_view_new_long,
+                        THEN vs.period_view_count ELSE 0 END) AS views_new_long,
                     SUM(CASE
                         WHEN vs.is_new AND vs.is_short
-                        THEN vs.period_view_count ELSE 0 END) AS pv_view_new_short,
+                        THEN vs.period_view_count ELSE 0 END) AS views_new_short,
                     SUM(CASE
                         WHEN vs.is_new IS FALSE AND vs.is_short IS FALSE
-                        THEN vs.period_view_count ELSE 0 END) AS pv_view_old_long,
+                        THEN vs.period_view_count ELSE 0 END) AS views_old_long,
                     SUM(CASE
                         WHEN vs.is_new IS FALSE AND vs.is_short
-                        THEN vs.period_view_count ELSE 0 END) AS pv_view_old_short,
+                        THEN vs.period_view_count ELSE 0 END) AS views_old_short,
                     SUM(CASE
                         WHEN vs.is_short THEN vs.period_view_count / 10
                         WHEN vs.is_short IS FALSE THEN vs.period_view_count
                         ELSE NULL
-                    END) AS pv_score,
-                    COALESCE(SUM(vs.period_like_count), 0) AS pv_like,
-                    COALESCE(SUM(vs.period_comment_count), 0) AS pv_comment
-                FROM channel_periods AS c
+                    END) AS score,
+                    COALESCE(SUM(vs.period_like_count), 0) AS video_likes,
+                    COALESCE(SUM(vs.period_comment_count), 0) AS video_comments
+                FROM cur AS c
                 LEFT JOIN video_stat AS vs
                     ON vs.channel_id = c.channel_id
                    AND vs.report_period = c.report_period
@@ -1442,103 +1381,115 @@ class ChannelStatDAO(BaseDAO):
             ),
             ranked AS (
                 SELECT
-                    vs.*,
+                    c.*,
+                    vs.new_longs,
+                    vs.new_shorts,
+                    vs.video_views,
+                    vs.views_new_long,
+                    vs.views_new_short,
+                    vs.views_old_long,
+                    vs.views_old_short,
+                    vs.score,
+                    vs.video_likes,
+                    vs.video_comments,
                     RANK() OVER (
-                        PARTITION BY ch.category_id, vs.report_period
-                        ORDER BY COALESCE(vs.pv_score, 0) DESC
-                    ) AS pv_score_rank
-                FROM video_stats AS vs
-                JOIN channel AS ch ON ch.channel_id = vs.channel_id
-                WHERE ch.status = {ChannelStatus.ACTIVE}
+                        PARTITION BY c.category_id, c.report_period
+                        ORDER BY COALESCE(vs.score, 0) DESC
+                    ) AS rank
+                FROM cur AS c
+                LEFT JOIN video_stats AS vs
+                    ON vs.channel_id = c.channel_id
+                   AND vs.report_period = c.report_period
             ),
             duration AS (
                 SELECT
                     channel_id,
                     published_at_period AS report_period,
-                    SUM(duration) AS pv_duration
+                    SUM(duration) AS duration_sec
                 FROM video
                 WHERE published_at_period = :report_period
                 GROUP BY channel_id, published_at_period
             ),
-            updates AS (
+            built AS (
                 SELECT
-                    r.*,
-                    d.pv_duration
+                    r.channel_id,
+                    r.report_period,
+                    r.channel_title,
+                    r.description,
+                    r.custom_url,
+                    r.thumbnail_url,
+                    r.category_id,
+                    r.stats_at,
+                    r.channel_views,
+                    r.channel_subscribers,
+                    r.channel_videos,
+                    COALESCE(r.channel_views, 0)
+                        - COALESCE(pcs.channel_views, 0) AS channel_views_mom,
+                    COALESCE(r.channel_subscribers, 0)
+                        - COALESCE(pcs.channel_subscribers, 0) AS channel_subscribers_mom,
+                    COALESCE(r.channel_videos, 0)
+                        - COALESCE(pcs.channel_videos, 0) AS channel_videos_mom,
+                    r.new_longs,
+                    r.new_shorts,
+                    d.duration_sec,
+                    r.video_views,
+                    r.views_new_long,
+                    r.views_new_short,
+                    r.views_old_long,
+                    r.views_old_short,
+                    r.video_likes,
+                    r.video_comments,
+                    r.score,
+                    COALESCE(r.score - prev.score, 0) AS score_mom,
+                    r.rank,
+                    COALESCE(r.rank - prev.rank, 0) AS rank_mom
                 FROM ranked AS r
+                LEFT JOIN prev_cs AS pcs ON pcs.channel_id = r.channel_id
                 LEFT JOIN duration AS d
                     ON d.channel_id = r.channel_id
                    AND d.report_period = r.report_period
+                LEFT JOIN channel_rating AS prev
+                    ON prev.channel_id = r.channel_id
+                   AND prev.report_period = r.report_period - INTERVAL '1 month'
+            ),
+            deleted AS (
+                DELETE FROM channel_rating
+                WHERE report_period = :report_period
+                RETURNING 1
             )
-            UPDATE channel_stat AS cs
-            SET
-                pv_video_long = u.pv_video_long,
-                pv_video_short = u.pv_video_short,
-                pv_score = u.pv_score,
-                pv_view = u.pv_view,
-                pv_view_new_long = u.pv_view_new_long,
-                pv_view_new_short = u.pv_view_new_short,
-                pv_view_old_long = u.pv_view_old_long,
-                pv_view_old_short = u.pv_view_old_short,
-                pv_like = u.pv_like,
-                pv_comment = u.pv_comment,
-                pv_duration = u.pv_duration,
-                pv_score_rank = u.pv_score_rank,
-                updated_at = CURRENT_TIMESTAMP
-            FROM updates AS u
-            WHERE cs.channel_id = u.channel_id
-              AND cs.report_period = u.report_period
-        """
-
-        # --- step 5: score/rank MoM (ppcs_id set in step 3) ---
-        sql_chg = """
-            WITH updates AS (
-                SELECT
-                    cur.id,
-                    COALESCE(cur.pv_score - prev.pv_score, 0) AS pv_score_change,
-                    COALESCE(cur.pv_score_rank - prev.pv_score_rank, 0)
-                        AS pv_score_rank_change
-                FROM channel_stat AS cur
-                JOIN channel_stat AS prev ON prev.id = cur.ppcs_id
-                WHERE cur.report_period = :report_period
-                  AND cur.ppcs_id > 0
+            INSERT INTO channel_rating (
+                channel_id, report_period,
+                channel_title, description, custom_url, thumbnail_url, category_id,
+                stats_at, channel_views, channel_subscribers, channel_videos,
+                channel_views_mom, channel_subscribers_mom, channel_videos_mom,
+                new_longs, new_shorts, duration_sec,
+                video_views, views_new_long, views_new_short,
+                views_old_long, views_old_short,
+                video_likes, video_comments,
+                score, score_mom, rank, rank_mom
             )
-            UPDATE channel_stat AS cs
-            SET
-                pv_score_change = u.pv_score_change,
-                pv_score_rank_change = u.pv_score_rank_change,
-                updated_at = CURRENT_TIMESTAMP
-            FROM updates u
-            WHERE cs.id = u.id
+            SELECT
+                channel_id, report_period,
+                channel_title, description, custom_url, thumbnail_url, category_id,
+                stats_at, channel_views, channel_subscribers, channel_videos,
+                channel_views_mom, channel_subscribers_mom, channel_videos_mom,
+                new_longs, new_shorts, duration_sec,
+                video_views, views_new_long, views_new_short,
+                views_old_long, views_old_short,
+                video_likes, video_comments,
+                score, score_mom, rank, rank_mom
+            FROM built
         """
 
         async with async_session_maker() as session:
-            r1 = await session.execute(text(sql_pc), params)
+            result = await session.execute(text(sql), params)
             await session.commit()
-            stats["pc"] = r1.rowcount
-            logger.info(
-                f"channel_stat.backfill_denorm: pc/ppcs updated={stats['pc']} "
-                f"period={report_period}"
-            )
-
-            r2 = await session.execute(text(sql_pv), params)
-            await session.commit()
-            stats["pv"] = r2.rowcount
-            logger.info(
-                f"channel_stat.backfill_denorm: pv_* updated={stats['pv']} "
-                f"period={report_period}"
-            )
-
-            r3 = await session.execute(text(sql_chg), params)
-            await session.commit()
-            stats["chg"] = r3.rowcount
-            logger.info(
-                f"channel_stat.backfill_denorm: score_change updated={stats['chg']} "
-                f"period={report_period}"
-            )
+            n = result.rowcount
 
         total_s = time.monotonic() - t_all
+        stats = {"rows": n}
         logger.info(
-            f"channel_stat.backfill_denorm: done period={report_period} "
-            f"in {total_s:.1f}s pc={stats['pc']} pv={stats['pv']} chg={stats['chg']}"
+            f"channel_rating.build: period={report_period} "
+            f"rows={n} in {total_s:.1f}s"
         )
         return stats

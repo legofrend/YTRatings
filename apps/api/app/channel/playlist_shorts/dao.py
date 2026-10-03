@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import bindparam, text
 
@@ -157,7 +157,13 @@ class PlaylistShortsDAO(BaseDAO):
             logger.warning("No channels to sync shorts")
             return "ok"
 
-        fetch_marker = min(datetime.now(), date_to)
+        # Naive UTC watermark (aligned with published_at / video fetch markers).
+        to_dt = (
+            date_to
+            if isinstance(date_to, datetime)
+            else datetime.combine(date_to, datetime.min.time())
+        )
+        fetch_marker = min(datetime.now(UTC).replace(tzinfo=None), to_dt)
         total = len(channels)
         logger.info(
             f"shorts-sync: {total} channels, window [{date_from} .. {date_to})"

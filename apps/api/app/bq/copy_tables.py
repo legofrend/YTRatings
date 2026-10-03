@@ -18,6 +18,7 @@ import sys
 import time
 from datetime import date, datetime, timedelta, time as dt_time
 from decimal import Decimal
+from typing import TextIO
 from uuid import UUID
 
 import psycopg2
@@ -71,6 +72,8 @@ def _convert(value, udt_name: str):
         return value.hex()
     if udt_name in {"json", "jsonb"} and isinstance(value, str):
         return json.loads(value)
+    if udt_name in {"tsvector", "tsquery"}:
+        return str(value)
     return value
 
 
@@ -258,7 +261,7 @@ def copy_table(
     _promote_staging(bq_client, staging_ref, dest_ref)
     elapsed = time.perf_counter() - started
     rate = copied / elapsed if elapsed else 0
-    print()
+    _progress_finish()
     print(
         f"  {table.name}: {total} rows in {_fmt_elapsed(elapsed)}"
         f" ({rate:,.0f} rows/s this run)"
@@ -266,9 +269,42 @@ def copy_table(
     return total, pg_conn
 
 
+_progress_fp: TextIO | None | bool = None
+_progress_last_pipe: float = 0.0
+
+
+def _progress_stream() -> TextIO | None:
+    """Live progress on the real console, not through stdout pipes (Tee/PS)."""
+    global _progress_fp
+    if _progress_fp is False:
+        return None
+    if _progress_fp is not None:
+        return _progress_fp  # type: ignore[return-value]
+    try:
+        if sys.platform == "win32":
+            _progress_fp = open("CONOUT$", "w", encoding="utf-8", errors="replace")
+            return _progress_fp
+        if sys.stderr.isatty():
+            _progress_fp = sys.stderr
+            return _progress_fp
+    except OSError:
+        pass
+    _progress_fp = False
+    return None
+
+
+def _progress_finish() -> None:
+    """End the in-place progress line before the next stdout summary."""
+    stream = _progress_stream()
+    if stream is not None:
+        stream.write("\n")
+        stream.flush()
+
+
 def _log_progress(
     name: str, copied: int, already: int, total: int, started: float
 ) -> None:
+    global _progress_last_pipe
     elapsed = time.perf_counter() - started
     done = already + copied
     rate = copied / elapsed if elapsed else 0
@@ -282,7 +318,18 @@ def _log_progress(
         f"    {name}: {done:,}/{total:,}{pct}  "
         f"{_fmt_elapsed(elapsed)}  {rate:,.0f} rows/s{extra}"
     )
-    print(f"\r{line:<120}", end="", flush=True)
+    stream = _progress_stream()
+    if stream is not None:
+        # \r + erase-to-EOL: one visual line, safe for longer/shorter updates
+        stream.write(f"\r\033[K{line}")
+        stream.flush()
+        return
+    # No console (CI / fully piped): rare newline so logs don't explode
+    now = time.perf_counter()
+    finished = total > 0 and done >= total
+    if finished or now - _progress_last_pipe >= 30:
+        print(line, flush=True)
+        _progress_last_pipe = now
 
 
 def main(argv: list[str] | None = None) -> int:

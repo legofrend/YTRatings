@@ -98,7 +98,7 @@ def load_scenario(name: str = "close") -> Scenario:
 
 
 def resolve_period(scenario: Scenario, now: datetime | None = None) -> Period:
-    tz_name = scenario.when.get("timezone") or "Europe/Moscow"
+    tz_name = scenario.when.get("timezone") or "UTC"
     now = now or datetime.now(ZoneInfo(tz_name))
     if now.tzinfo is None:
         now = now.replace(tzinfo=ZoneInfo(tz_name))
@@ -114,7 +114,7 @@ def resolve_period(scenario: Scenario, now: datetime | None = None) -> Period:
 
 
 def in_calendar_window(scenario: Scenario, now: datetime | None = None) -> bool:
-    tz_name = scenario.when.get("timezone") or "Europe/Moscow"
+    tz_name = scenario.when.get("timezone") or "UTC"
     now = now or datetime.now(ZoneInfo(tz_name))
     if now.tzinfo is None:
         now = now.replace(tzinfo=ZoneInfo(tz_name))

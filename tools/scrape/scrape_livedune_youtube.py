@@ -8,9 +8,9 @@ Phase 2: detail pages → @handle
 Public api.livedune.com is paid (403). Rating UI is Next.js SSR — parse HTML.
 
 Examples:
-  python scripts/scrape_livedune_youtube.py list --max-pages 4
-  python scripts/scrape_livedune_youtube.py details --batch-size 25 --delay 1.5
-  python scripts/scrape_livedune_youtube.py all --max-pages 4
+  python tools/scrape/scrape_livedune_youtube.py list --max-pages 4
+  python tools/scrape/scrape_livedune_youtube.py details --batch-size 25 --delay 1.5
+  python tools/scrape/scrape_livedune_youtube.py all --max-pages 4
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUT = ROOT / "data" / "livedune_youtube_world.json"
 BASE = "https://livedune.com"
 LIST_URL = BASE + "/ru/ratings/youtube/?page={page}"

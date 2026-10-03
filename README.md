@@ -21,7 +21,7 @@ deploy/       всё, что едет на VPS
   nginx/                 конфиг сайта (копия /etc/nginx/sites-available/ytr)
   systemd/               ytr-auto.service / .timer + run-auto.sh
 scripts/      локальная разработка (dev-ytr.ps1 / .sh)
-tools/        analysis/ (notebooks), video_gen/ — вспомогательное, в основном не в git
+tools/        analysis/, video_gen/, scrape/ — вспомогательное, в основном не в git
 media/        generated: channel_logo/, wordstat_img/ — не в git
 site/         зеркало Nuxt .output/public для деплоя — не в git
 data/         локальные seed/scratch — не в git
@@ -32,19 +32,19 @@ data/         локальные seed/scratch — не в git
 ### Подсказка по файлам (`apps/api`)
 
 - `app/api/ytapi` — работа с YouTube API
-- `app/.../dao`, `models` — работа с БД (Postgres; raw ingest может писать в BigQuery)
+- `app/.../dao`, `models` — работа с БД (ingest → Postgres only)
+- `app/bq` — PG → BigQuery warehouse sync (`client` / `create_tables` / `copy_tables` / `sync`)
 - `logger`, `config`, `period`, `media_paths` — вспомогательные классы и функции
-- `sql/views*.sql`, `sql/build_report_bq.sql` — views / сборка отчёта
+- `sql/schema.sql` — DDL (tables / views / indexes / triggers)
 - `app/main.py` — CLI пайплайна
-- `app/fast_api` — API для фронта
+- `app/fast_api` — API для фронта (`/api/ytr/*`; `/api/ytr/v2/*` → 308 redirect)
 
 ### Параметры для `.env`
 
 - `YT_API_KEY=...`
 - `LOG_LEVEL=INFO`
-- `RAW_DB=postgres|bigquery`
-- `YTR_MEDIA_ROOT=...` — корень `media/` (на VPS: `/var/www/o2t4/backend/YTRatings/media`)
-- DB_* / BQ_* — см. `app/config.py`
+- `YTR_MEDIA_ROOT=...` — корень `media/` (на VPS: `/srv/projects/ytratings/media`)
+- DB_* / BQ_* — см. `app/config.py` (BQ_* только для WH sync)
 
 Секреты (пароли, API keys, SA JSON) — только в `.env` / на VPS, **не в git**.
 
@@ -68,7 +68,8 @@ Main objects and properties:
 
 | Что | Путь |
 |-----|------|
-| git-репо | `/var/www/o2t4/backend/YTRatings/` |
+| git-репо (canonical) | `/srv/projects/ytratings/` |
+| compat symlink | `/var/www/o2t4/backend/YTRatings` → canonical |
 | backend + compose | `.../apps/api/` (`.env`, `.env-docker`, `.venv` — тут) |
 | frontend source | `.../apps/web/` |
 | live SSG (nginx root) | `.../site/` |
@@ -76,6 +77,7 @@ Main objects and properties:
 | nginx конфиг | `/etc/nginx/sites-available/ytr` → `sites-enabled/ytr` |
 | копия nginx в репо | `deploy/nginx/ytr.nginx.conf` |
 | systemd | `deploy/systemd/ytr-auto.{service,timer}` → `/etc/systemd/system/` |
+| auto schedule (UTC) | 11 / 20 / last‑3..1 @ 05:00 harvest; 1st @ 00:01 + 07:01 close |
 | логи | `.../apps/api/logs/yt_fetcher.log`, `auto-cron.log` |
 | docker | `ytr_app` (:5001), `o2t4_db` (:5433) из `apps/api/docker-compose.yml` (compose project `yt_fetcher`) |
 
@@ -92,7 +94,7 @@ Main objects and properties:
 ### Миграция на layout `apps/` + `media/` (один раз на VPS)
 
 ```bash
-cd /var/www/o2t4/backend/YTRatings
+cd /srv/projects/ytratings   # or compat: /var/www/o2t4/backend/YTRatings
 git fetch && git checkout refactor/media-and-cleanup && git pull
 
 # 1) секреты и логи API: не в git, git pull их не переносит
@@ -116,7 +118,9 @@ cd apps/api && docker compose up -d --build && cd ../..
 cp deploy/nginx/ytr.nginx.conf /etc/nginx/sites-available/ytr
 nginx -t && systemctl reload nginx
 cp deploy/systemd/ytr-auto.service deploy/systemd/ytr-auto.timer /etc/systemd/system/
-chmod +x deploy/systemd/run-auto.sh && systemctl daemon-reload
+chmod +x deploy/systemd/run-auto.sh
+systemctl daemon-reload && systemctl enable --now ytr-auto.timer
+# systemctl list-timers ytr-auto.timer  # проверить следующие срабатывания (UTC)
 
 # 6) после проверки сайта: снести старое
 # rm -rf yt_fetcher frontend frontend-nuxt
@@ -126,8 +130,42 @@ chmod +x deploy/systemd/run-auto.sh && systemctl daemon-reload
 
 | Путь / конфиг | Проект |
 |---------------|--------|
-| `/root/oleg/` | endup, slms, telegram-bot |
+| `/root/oleg/` | endup, slms, telegram-bot *(legacy → `/srv/projects/`)* |
 | `/etc/nginx/sites-available/endup` | endup.info |
+
+### Layout `/srv/projects` (без остановки YTR)
+
+Цель: один корень проектов на VPS (зеркало локального `4. Projects`), YTR не обязан жить под `/var/www/o2t4/backend/`.
+
+```
+/srv/projects/
+  ytratings/              # monorepo (site/, media/, apps/…)
+  end-up/
+  slms/
+  telegram-spygame-bot/
+  …                       # плоско, без слоя oleg/
+```
+
+`/root/oleg` → symlink на `/srv/projects` (старые nginx-пути `~/oleg/end-up/...` живы).
+
+**Почему можно двигать YTR без stop:** Postgres — named docker volume (`backend_o2t4_postgresdata`), у `ytr_app` нет bind-mount репо. Nginx/systemd продолжают ходить по старому пути через reverse symlink.
+
+На VPS (после `git pull` в текущий checkout):
+
+```bash
+# 1) сейчас, zero-risk: mkdir + alias /srv/projects/ytratings → текущий путь; перенос /root/oleg/*
+bash deploy/vps-layout.sh prepare
+
+# 2) когда удобно (секунды, docker не трогаем): mv + symlink старого пути
+bash deploy/vps-layout.sh cutover
+
+# 3) опционально: nginx/systemd на канонический путь + reload (контейнеры живут)
+bash deploy/vps-layout.sh retarget
+
+bash deploy/vps-layout.sh status
+```
+
+После `cutover` + `retarget` деплой по умолчанию идёт в `/srv/projects/ytratings` (`deploy/deploy-ytr.*`). Compat symlink на старом пути можно оставить.
 
 ### SSH с ПК
 
@@ -154,12 +192,12 @@ ssh root@o2t4.ru
 
 Git Bash / WSL: `./deploy/deploy-ytr.sh -m "..."`.  
 Локальный dev (FastAPI :5000 + Nuxt :3000): `.\scripts\dev-ytr.ps1`.  
-`media/` на VPS не в git и не затирается деплоем. SSG по умолчанию с `https://ytr.o2t4.ru/api/ytr/v2`.
+`media/` на VPS не в git и не затирается деплоем. SSG по умолчанию с `https://ytr.o2t4.ru/api/ytr`.
 
 ### Типичный ручной деплой
 
 ```bash
-cd /var/www/o2t4/backend/YTRatings
+cd /srv/projects/ytratings
 git fetch && git checkout <branch> && git pull
 
 # API
@@ -183,17 +221,26 @@ poetry install --with ingest,dev
 
 ```bash
 cd apps/api
-python -m app.main channel-stat --cats 1
-python -m app.main videos --cats 1
-python -m app.main video-stat --cats 1
-python -m app.main backfill-denorm --period 2026-08
-python -m app.main backfill-channel-denorm --period 2026-08
+python -m app.main fetch-channel-stats --cats 1
+python -m app.main fetch-videos --cats 1
+python -m app.main fetch-video-stats --cats 1
+python -m app.main denorm --period 2026-08
+python -m app.main build-rating --period 2026-08
 # --force: перезаписать channel/video stat, не только missing
-# publish (report JSONB) obsolete — frontend uses v2 channel_stat/video_stat
 
-# edit channels (category / status / priority). Default dry-run; --apply writes.
+# edit-channels: category / status / priority. Default dry-run; --apply writes.
 # UI: Shift+click channel logo → JSONL row with @handle (UC… only if no handle).
 python -m app.main edit-channels --id @somehandle --status 0
-python -m app.main edit-channels --file scripts/channel_edits.example.jsonl
 python -m app.main edit-channels --file edits.jsonl --apply
+
+# edits.jsonl (one object per line; null = leave field unchanged):
+# {"channel_id":"UCxxx…","status":0}
+# {"channel_id":"UCyyy…","category_id":19}
+# {"id":"@somehandle","category_id":3,"status":1,"priority":50}
+#
+# edits.csv:
+# channel_id,category_id,status,priority
+# UCxxx…,,0,
+# UCyyy…,19,,
+# @somehandle,3,1,50
 ```

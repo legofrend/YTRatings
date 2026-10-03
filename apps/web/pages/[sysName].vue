@@ -117,13 +117,35 @@ watch(channelFilter, () => {
   if (inlineSearch.value) clearInlineSearch()
 })
 
-/** SSG payload: category + latest period channels (SEO). Soft-404 keeps toolbar. */
+/** Defaults baked into SSG (match default UI: топ 20, 12 мес., до 20 видео). */
+const SSG_DYNAMICS_LIMIT = 20
+const SSG_DYNAMICS_MONTHS = 12
+const SSG_CATEGORY_VIDEOS = 20
+
+type WordstatReport = {
+  leaving: { lexeme: string; word: string; freq: number; type: number | null }[]
+  core: { lexeme: string; word: string; freq: number; type: number | null }[]
+  ['new']: { lexeme: string; word: string; freq: number; type: number | null }[]
+}
+
+function emptyPageExtras() {
+  return {
+    categoryHistory: [] as Record<string, any>[],
+    categoryHistoryLimit: SSG_DYNAMICS_LIMIT,
+    categoryHistoryMonths: SSG_DYNAMICS_MONTHS as 12 | 24,
+    categoryTopVideos: [] as ReturnType<typeof mapVideo>[],
+    wordstat: null as WordstatReport | null,
+  }
+}
+
+/** SSG payload: category + latest period channels + category panel extras. */
 const { data: page, error, pending, refresh: refreshPage } = await useAsyncData(
   () => `cat-${sysName.value}`,
   async () => {
     const cats = (await fetchCategories()) as Category[]
     const categories = cats.filter((c) => c.id !== 0 && c.sys_name)
     const cat = cats.find((c) => c.sys_name === sysName.value)
+    const extras = emptyPageExtras()
 
     if (!cat) {
       return {
@@ -136,6 +158,7 @@ const { data: page, error, pending, refresh: refreshPage } = await useAsyncData(
         total: 0,
         channels: [] as ReturnType<typeof mapChannel>[],
         missing: 'category' as const,
+        ...extras,
       }
     }
 
@@ -151,14 +174,24 @@ const { data: page, error, pending, refresh: refreshPage } = await useAsyncData(
         total: 0,
         channels: [] as ReturnType<typeof mapChannel>[],
         missing: 'periods' as const,
+        ...extras,
       }
     }
     const latestPeriod = periods[0]
-    const res = await fetchChannels(cat.id, latestPeriod, {
-      limit: 100,
-      offset: 0,
-      videos: true,
-    })
+    const [res, dynRes, vidRes, wsRes] = await Promise.all([
+      fetchChannels(cat.id, latestPeriod, {
+        limit: 100,
+        offset: 0,
+        videos: true,
+      }),
+      categoryDynamics(cat.id, SSG_DYNAMICS_LIMIT, SSG_DYNAMICS_MONTHS).catch(
+        () => null
+      ),
+      fetchCategoryVideos(cat.id, latestPeriod, SSG_CATEGORY_VIDEOS).catch(
+        () => null
+      ),
+      fetchWordstat(cat.id, latestPeriod).catch(() => null),
+    ])
     const channels = (res.channels || []).map(mapChannel)
 
     return {
@@ -171,6 +204,17 @@ const { data: page, error, pending, refresh: refreshPage } = await useAsyncData(
       total: res.total ?? channels.length,
       channels,
       missing: null as null,
+      categoryHistory: dynRes?.points || [],
+      categoryHistoryLimit: SSG_DYNAMICS_LIMIT,
+      categoryHistoryMonths: SSG_DYNAMICS_MONTHS as 12 | 24,
+      categoryTopVideos: (vidRes?.videos || []).map(mapVideo),
+      wordstat: wsRes
+        ? {
+            leaving: wsRes.leaving || [],
+            core: wsRes.core || [],
+            new: wsRes.new || [],
+          }
+        : null,
     }
   },
   {
@@ -795,12 +839,43 @@ const canExpandCategoryTopVideos = computed(() => {
   return categoryTopVideosLimit.value < Math.min(CATEGORY_VIDEOS_MAX, n)
 })
 
+function ssgHistoryMatches(catId: number, months: number, limit: number) {
+  const p = page.value
+  if (!p?.category || p.category.id !== catId) return false
+  return (
+    months === (p.categoryHistoryMonths ?? SSG_DYNAMICS_MONTHS) &&
+    limit === (p.categoryHistoryLimit ?? SSG_DYNAMICS_LIMIT) &&
+    Array.isArray(p.categoryHistory)
+  )
+}
+
+function ssgVideosMatch(catId: number, period: string) {
+  const p = page.value
+  return (
+    !!p?.category &&
+    p.category.id === catId &&
+    p.latestPeriod === period &&
+    Array.isArray(p.categoryTopVideos)
+  )
+}
+
 async function loadCategoryHistory(force = false) {
   const catId = page.value?.category?.id
   if (catId == null) return
   const months = categoryHistoryMonths.value
   const key = `${catId}:${apiLimit.value}:${months}`
   if (!force && categoryHistory.value && categoryHistoryKey.value === key) return
+
+  // Latest-period defaults: already in SSG payload — no client round-trip.
+  if (
+    !force &&
+    ssgHistoryMatches(catId, months, apiLimit.value)
+  ) {
+    categoryHistory.value = page.value!.categoryHistory
+    categoryHistoryKey.value = key
+    categoryHistoryError.value = null
+    return
+  }
 
   categoryHistoryLoading.value = true
   categoryHistoryError.value = null
@@ -827,6 +902,13 @@ async function loadCategoryTopVideos(force = false) {
     categoryTopVideos.value &&
     categoryTopVideosKey.value === key
   ) {
+    return
+  }
+
+  if (!force && ssgVideosMatch(catId, period)) {
+    categoryTopVideos.value = page.value!.categoryTopVideos
+    categoryTopVideosKey.value = key
+    categoryTopVideosError.value = null
     return
   }
 
@@ -901,11 +983,6 @@ onUnmounted(() => {
   document.removeEventListener('click', onHelpDocClick)
 })
 
-type WordstatReport = {
-  leaving: { lexeme: string; word: string; freq: number; type: number | null }[]
-  core: { lexeme: string; word: string; freq: number; type: number | null }[]
-  ['new']: { lexeme: string; word: string; freq: number; type: number | null }[]
-}
 const wordstatReport = ref<WordstatReport | null>(null)
 const wordstatKey = ref('')
 
@@ -925,6 +1002,18 @@ async function loadWordstat() {
   }
   const key = `${catId}|${period}`
   if (key === wordstatKey.value && wordstatReport.value) return
+
+  const p = page.value
+  if (
+    p?.wordstat &&
+    p.category?.id === catId &&
+    p.latestPeriod === period
+  ) {
+    wordstatReport.value = p.wordstat
+    wordstatKey.value = key
+    return
+  }
+
   try {
     const res = await fetchWordstat(catId, period)
     wordstatReport.value = {
@@ -980,7 +1069,16 @@ watch(
       подписчикам и динамике. Ежемесячное сравнение YouTube-каналов.
     </p>
 
-    <p v-if="pagePending && !page">Loading...</p>
+    <div
+      v-if="pagePending && !page"
+      class="flex items-center justify-center gap-2 py-16 text-sm text-white/80"
+      aria-live="polite"
+    >
+      <span
+        class="inline-block h-5 w-5 rounded-full border-2 border-white/30 border-t-white animate-spin"
+      />
+      Загружаем рейтинг…
+    </div>
     <div
       v-else-if="pageFetchFailed"
       class="mx-auto max-w-md px-4 py-8"

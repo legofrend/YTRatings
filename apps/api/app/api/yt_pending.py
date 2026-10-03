@@ -1,5 +1,5 @@
 """
-YouTube API → DB write safety (same idea as app.bq.write pending dumps).
+YouTube API → Postgres write safety.
 
 Flow: fetch from YT → dump rows to logs/yt_pending/ → write DB → delete dump.
 On failure the dump stays; flush_pending() / next commit for that op replays it
@@ -153,39 +153,21 @@ async def _write_channel_detail_handles(rows: list[dict], meta: dict) -> bool:
 
 async def _write_video_stat(rows: list[dict], meta: dict) -> bool:
     from app.channel.video.dao import VideoStatDAO
-    from app.config import settings
 
-    if settings.RAW_DB == "bigquery":
-        from app.channel.video.dao_bq import VideoStatBqDAO
-
-        await VideoStatBqDAO.add_bulk(rows)
-        return True
     res = await VideoStatDAO.add_bulk(rows)
     return res is not False
 
 
 async def _write_channel_stat(rows: list[dict], meta: dict) -> bool:
     from app.channel.dao import ChannelStatDAO
-    from app.config import settings
 
-    if settings.RAW_DB == "bigquery":
-        from app.channel.dao_bq import ChannelStatBqDAO
-
-        await ChannelStatBqDAO.add_bulk(rows)
-        return True
     res = await ChannelStatDAO.add_bulk(rows)
     return res is not False
 
 
 async def _write_video_status(rows: list[dict], meta: dict) -> bool:
     from app.channel.video.dao import VideoDAO
-    from app.config import settings
 
-    if settings.RAW_DB == "bigquery":
-        from app.channel.video.dao_bq import VideoBqDAO
-
-        await VideoBqDAO.update_bulk(rows)
-        return True
     return await VideoDAO.update_bulk(rows)
 
 

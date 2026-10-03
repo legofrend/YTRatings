@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from calendar import monthrange
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Literal
-from zoneinfo import ZoneInfo
 
 from app import ntfy
 from app.api import yt_quota
@@ -24,13 +23,12 @@ from app.pipeline import (
     set_step_status,
 )
 
-MSK = ZoneInfo("Europe/Moscow")
 _QUOTA_STOPS = frozenset({"quota_warn", "quota_exceeded"})
 RunStatus = Literal["done", "paused", "skipped"]
 
 
-def _now_msk() -> datetime:
-    return datetime.now(MSK)
+def _now_utc() -> datetime:
+    return datetime.now(UTC)
 
 
 def _step_priority_kwargs(params: dict[str, Any]) -> dict[str, Any]:
@@ -77,15 +75,11 @@ async def _dispatch_cmd(
 ) -> str | None:
     """Run one CLI command. Returns quota stop reason or None."""
     from app.main import (
-        cmd_apply_is_short,
-        cmd_backfill_channel_denorm,
-        cmd_backfill_denorm,
-        cmd_channel_report,
-        cmd_channel_stat,
-        cmd_shorts_sync,
-        cmd_video_detail,
-        cmd_video_stat,
-        cmd_videos,
+        cmd_build_rating,
+        cmd_denorm,
+        cmd_fetch_channel_stats,
+        cmd_fetch_video_stats,
+        cmd_fetch_videos,
     )
 
     p = step.params
@@ -93,39 +87,34 @@ async def _dispatch_cmd(
     prio = _step_priority_kwargs(p)
     # Explicit null priority_lte → all priorities; omit → default 100
     priority = prio["priority"] if "priority" in prio else 100
+    # YAML: prefer skip_duration; accept legacy skip_detail as alias in params only
+    skip_duration = bool(p.get("skip_duration", p.get("skip_detail", False)))
 
-    if name == "channel-stat":
-        await cmd_channel_stat(period, cats, force=bool(p.get("force")))
-    elif name == "video-stat":
-        await cmd_video_stat(period, cats, force=bool(p.get("force")))
-    elif name == "videos":
-        return await cmd_videos(
+    if name == "fetch-channel-stats":
+        await cmd_fetch_channel_stats(period, cats, force=bool(p.get("force")))
+    elif name == "fetch-video-stats":
+        await cmd_fetch_video_stats(period, cats, force=bool(p.get("force")))
+    elif name == "fetch-videos":
+        return await cmd_fetch_videos(
             period,
             cats,
             priority=priority,
             priority_gt=prio.get("priority_gt"),
             skip_shorts=bool(p.get("skip_shorts", False)),
-            skip_detail=bool(p.get("skip_detail", False)),
-        )
-    elif name == "video-detail":
-        await cmd_video_detail(cats)
-    elif name == "shorts-sync":
-        return await cmd_shorts_sync(
-            period,
-            cats,
-            priority=priority,
-            priority_gt=prio.get("priority_gt"),
-            channel_id=None,
+            skip_duration=skip_duration,
+            skip_apply=bool(p.get("skip_apply", False)),
+            only_duration=bool(p.get("only_duration", False)),
+            only_shorts=bool(p.get("only_shorts", False)),
             only_missing=bool(p.get("only_missing", False)),
         )
-    elif name == "apply-is-short":
-        await cmd_apply_is_short(category_ids=cats, channel_id=None)
-    elif name == "backfill-denorm":
-        await cmd_backfill_denorm(period, None)
-    elif name == "backfill-channel-denorm":
-        await cmd_backfill_channel_denorm(period, None)
-    elif name == "channel-report":
-        await cmd_channel_report(period)
+    elif name == "denorm":
+        await cmd_denorm(
+            period,
+            None,
+            batch_size=int(p.get("batch_size", 10_000)),
+        )
+    elif name == "build-rating":
+        await cmd_build_rating(period, None)
     else:
         raise SystemExit(f"auto: unsupported cmd {name!r} in step {step.id}")
     return None
@@ -248,11 +237,15 @@ async def _run_close(
 
 
 def _harvest_priority(now: datetime) -> int | None | Literal[False]:
-    """False = idle. None = all priorities. int = priority ceiling."""
+    """False = idle. None = all priorities. int = priority ceiling.
+
+    Calendar is UTC. Near month-end (last 3 days) prefer top channels first;
+    last day after 08:00 UTC → idle (close starts 00:01 UTC on the 1st).
+    """
     last = monthrange(now.year, now.month)[1]
     if now.day == last and (now.hour, now.minute, now.second) >= (8, 0, 0):
         return False
-    if now.day == last - 1 or now.day == last:
+    if now.day >= last - 2:
         return 100
     return None
 
@@ -263,8 +256,8 @@ async def _run_harvest(
     category_ids: list[int],
     priority: int | None,
 ) -> RunStatus:
-    """Full videos chain (detail + shorts + is_short). Resume via DB cursors."""
-    from app.main import cmd_videos
+    """Full fetch-videos chain (duration + shorts + is_short). Resume via DB cursors."""
+    from app.main import cmd_fetch_videos
 
     label = "harvest_top" if priority is not None else "harvest_all"
     logger.info(
@@ -275,7 +268,7 @@ async def _run_harvest(
         title=f"ytr · auto {label}",
     )
 
-    stop = await cmd_videos(period, category_ids, priority=priority)
+    stop = await cmd_fetch_videos(period, category_ids, priority=priority)
     if stop not in _QUOTA_STOPS:
         stop = _quota_stop_after_cmd()
     yt_quota.flush(reason=f"auto-after-{label}")
@@ -303,18 +296,19 @@ async def run_auto(
     force: bool = False,
 ) -> None:
     """
-    Mutually exclusive phases (never chain close → harvest in one run):
+    Mutually exclusive phases (never chain close → harvest in one run).
+    All calendar decisions use UTC (month boundary = 00:00 UTC).
 
-    1) days 1..5 MSK (or --force): close only — YAML + pipeline_run
+    1) days 1..5 UTC (or --force): close only — YAML + pipeline_run
     2) outside close window:
-       - last day >= 08:00 MSK — idle
-       - penultimate (or last day < 08:00) — harvest priority<=100
+       - last day >= 08:00 UTC — idle
+       - last 3 days (before idle) — harvest priority<=100
        - else — harvest all priorities
 
     Unfinished close after day 5 is not auto-resumed; use manual commands.
-    No sleeping for quota; cron re-invokes later.
+    No sleeping for quota; timer re-invokes later.
     """
-    now = _now_msk()
+    now = _now_utc()
     await ensure_schema()
     logger.info(f"auto: now={now.isoformat()} force={force}")
 
@@ -328,7 +322,7 @@ async def run_auto(
     priority = _harvest_priority(now)
     if priority is False:
         logger.info(
-            "auto: idle — last day of month after 08:00 MSK; "
+            "auto: idle — last day of month after 08:00 UTC; "
             "wait for next month"
         )
         return

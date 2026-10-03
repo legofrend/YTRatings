@@ -352,7 +352,7 @@ def sync_category_logos(
 
             save_errors(failures, f"logo_sync_cat{cid}")
 
-    logger.info("=== sync-logos summary ===")
+    logger.info("=== fetch-logos summary ===")
     for s in summaries:
         logger.info(
             f"cat={s['category_id']} ({s['name']}) sort={s['sort_order']} | "

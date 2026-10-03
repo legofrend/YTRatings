@@ -47,13 +47,14 @@ def stop_lexemes_for_category(category_id: int) -> list[str]:
     return out
 
 
-# type codes (NULL until backfill)
+# type codes (NULL = outside MoM top / not typed)
 TYPE_LEAVING = -1
 TYPE_CORE = 0
 TYPE_NEW = 1
 TYPE_BOTH = 2
 
-DEFAULT_TOP_N = 40
+DEFAULT_TOP_N = 40  # fill buffer (store extra ranks)
+DEFAULT_MOM_TOP_N = 20  # MoM type / report color sets
 
 
 def _as_date(p: date | Period | str) -> date:
@@ -76,6 +77,25 @@ def _period_range(start: date, end: date) -> list[date]:
 
 class WordstatDAO:
     model = Wordstat
+
+    @classmethod
+    async def has_period(
+        cls, category_id: int, period: date | Period | str
+    ) -> bool:
+        """True if wordstat already has any rows for category×period."""
+        p = _as_date(period)
+        async with async_session_maker() as session:
+            row = (
+                await session.execute(
+                    select(Wordstat.id)
+                    .where(
+                        Wordstat.category_id == category_id,
+                        Wordstat.period == p,
+                    )
+                    .limit(1)
+                )
+            ).first()
+            return row is not None
 
     @classmethod
     async def fill(
@@ -200,13 +220,19 @@ class WordstatDAO:
         category_ids: list[int] | None = None,
         period_from: date | Period | str | None = None,
         period_to: date | Period | str | None = None,
+        mom_top_n: int = DEFAULT_MOM_TOP_N,
     ) -> dict:
         """Set type from MoM presence within each category.
+
+        MoM sets = top `mom_top_n` by freq per period (default 20), even if fill
+        stored more (e.g. 40). Ranks outside MoM top get type=NULL.
 
         Loads full period timeline for neighbor sets, but only UPDATEs rows whose
         period is in [period_from, period_to] when those are set (inclusive).
         Omit both → all periods (legacy).
         """
+        if mom_top_n < 1:
+            raise ValueError("mom_top_n must be >= 1")
         start = _as_date(period_from) if period_from is not None else None
         end = _as_date(period_to) if period_to is not None else start
         if start is not None and end is not None and end < start:
@@ -234,17 +260,22 @@ class WordstatDAO:
                 if not periods:
                     continue
 
+                # period → (mom_top set, all lexemes for NULL-clear)
                 sets: dict[date, set[str]] = {}
+                all_lexemes: dict[date, list[str]] = {}
                 for period in periods:
-                    lexemes = (
+                    rows = (
                         await session.execute(
-                            select(Wordstat.lexeme).where(
+                            select(Wordstat.lexeme)
+                            .where(
                                 Wordstat.category_id == category_id,
                                 Wordstat.period == period,
                             )
+                            .order_by(Wordstat.freq.desc(), Wordstat.lexeme)
                         )
                     ).scalars().all()
-                    sets[period] = set(lexemes)
+                    all_lexemes[period] = list(rows)
+                    sets[period] = set(rows[:mom_top_n])
 
                 typed_n = 0
                 for i, period in enumerate(periods):
@@ -254,6 +285,11 @@ class WordstatDAO:
                     prev_set = sets[periods[i - 1]] if i > 0 else None
                     next_set = sets[periods[i + 1]] if i + 1 < len(periods) else None
                     cur = sets[period]
+                    outside = [
+                        lex
+                        for lex in all_lexemes[period]
+                        if lex not in cur
+                    ]
 
                     by_type: dict[int, list[str]] = {
                         TYPE_LEAVING: [],
@@ -287,11 +323,23 @@ class WordstatDAO:
                             .values(type=t)
                         )
                         updated += res.rowcount or 0
+
+                    if outside:
+                        res = await session.execute(
+                            update(Wordstat)
+                            .where(
+                                Wordstat.category_id == category_id,
+                                Wordstat.period == period,
+                                Wordstat.lexeme.in_(outside),
+                            )
+                            .values(type=None)
+                        )
+                        updated += res.rowcount or 0
                     typed_n += 1
 
                 logger.info(
                     f"wordstat type backfill cat={category_id} "
-                    f"typed={typed_n}/{len(periods)} periods"
+                    f"typed={typed_n}/{len(periods)} periods mom_top={mom_top_n}"
                     + (
                         f" range={start}..{end}"
                         if start is not None
@@ -304,6 +352,7 @@ class WordstatDAO:
         return {
             "categories": cats,
             "updated": updated,
+            "mom_top_n": mom_top_n,
             "period_from": start.isoformat() if start else None,
             "period_to": end.isoformat() if end else None,
         }
@@ -377,9 +426,9 @@ class WordstatDAO:
             t = r["type"]
             if t in (TYPE_NEW, TYPE_BOTH):
                 new.append(item(r))
-            elif t == TYPE_CORE or t is None:
+            elif t == TYPE_CORE:
                 core.append(item(r))
-            # type −1 of current month: shown as leaving when viewing M+1
+            # NULL = outside MoM top (fill buffer); type −1 of M → leaving on M+1
 
         return {
             "category_id": category_id,

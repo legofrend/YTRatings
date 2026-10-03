@@ -3,19 +3,18 @@ name = "yt_fetcher"
 version = "0.1.0"
 description = ""
 authors = ["legofrend <eremin.oleg@mail.com>"]
-readme = "README.md"
+package-mode = false
 
 # main = what VPS API Docker needs (always installed)
 [tool.poetry.dependencies]
 python = "^3.12"
-pydantic-settings = "^2.4.0"
-python-json-logger = "^2.0.7"
-sqlalchemy = "^2.0.33"
-asyncpg = "^0.29.0"
+pydantic-settings = "^2.15.0"
+# stay on 2.0.x — 2.1 is a separate migration
+sqlalchemy = ">=2.0.54,<2.1"
+asyncpg = "^0.31.0"
 psycopg2 = "^2.9.10"
-fastapi = "^0.115.3"
-fastapi-cache2 = "^0.2.2"
-uvicorn = "^0.32.0"
+fastapi = "^0.142.0"
+uvicorn = "^0.54.0"
 
 # monthly pipeline on your PC: poetry install --with ingest
 [tool.poetry.group.ingest]

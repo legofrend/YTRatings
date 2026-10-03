@@ -58,6 +58,8 @@ _UDT_MAP = {
     "citext": "STRING",
     "name": "STRING",
     "interval": "STRING",
+    "tsvector": "STRING",
+    "tsquery": "STRING",
 }
 
 

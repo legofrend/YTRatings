@@ -50,12 +50,12 @@ function fmtPct(v) {
 }
 
 function scoreTooltip(label, p, momPct) {
-  const newLong = Number(p.pv_view_new_long) || 0;
-  const oldLong = Number(p.pv_view_old_long) || 0;
-  const newShort = Number(p.pv_view_new_short) || 0;
-  const oldShort = Number(p.pv_view_old_short) || 0;
+  const newLong = Number(p.views_new_long) || 0;
+  const oldLong = Number(p.views_old_long) || 0;
+  const newShort = Number(p.views_new_short) || 0;
+  const oldShort = Number(p.views_old_short) || 0;
   const score =
-    Number(p.pv_score) ||
+    Number(p.score) ||
     newLong + oldLong + newShort / 10 + oldShort / 10;
   let tip =
     `${label}\n` +
@@ -80,14 +80,14 @@ function scaleRange(vals) {
 }
 
 function scoreParts(p) {
-  const newLong = Math.max(0, Number(p.pv_view_new_long) || 0);
-  const oldLong = Math.max(0, Number(p.pv_view_old_long) || 0);
-  const newShort = Math.max(0, (Number(p.pv_view_new_short) || 0) / 10);
-  const oldShort = Math.max(0, (Number(p.pv_view_old_short) || 0) / 10);
+  const newLong = Math.max(0, Number(p.views_new_long) || 0);
+  const oldLong = Math.max(0, Number(p.views_old_long) || 0);
+  const newShort = Math.max(0, (Number(p.views_new_short) || 0) / 10);
+  const oldShort = Math.max(0, (Number(p.views_old_short) || 0) / 10);
   const parts = { newLong, oldLong, newShort, oldShort };
   const sum = newLong + oldLong + newShort + oldShort;
-  if (sum <= 0 && p.pv_score) {
-    return { newLong: Number(p.pv_score) || 0, oldLong: 0, newShort: 0, oldShort: 0 };
+  if (sum <= 0 && p.score) {
+    return { newLong: Number(p.score) || 0, oldLong: 0, newShort: 0, oldShort: 0 };
   }
   return parts;
 }
@@ -108,7 +108,7 @@ const chart = computed(() => {
     const parts = scoreParts(p);
     const score =
       parts.newLong + parts.oldLong + parts.newShort + parts.oldShort ||
-      Number(p.pv_score) ||
+      Number(p.score) ||
       0;
     const label = shortPeriod(p.report_period);
     let scoreMomPct = null;
@@ -119,7 +119,7 @@ const chart = computed(() => {
           prevParts.oldLong +
           prevParts.newShort +
           prevParts.oldShort ||
-        Number(arr[i - 1].pv_score) ||
+        Number(arr[i - 1].score) ||
         0;
       if (prev > 0) scoreMomPct = ((score - prev) / prev) * 100;
     }
@@ -129,10 +129,10 @@ const chart = computed(() => {
       scoreMomPct,
       parts,
       tooltip: scoreTooltip(label, p, scoreMomPct),
-      subs: p.subscriber_count,
-      subsDelta: p.pc_subscriber,
+      subs: p.channel_subscribers,
+      subsDelta: p.channel_subscribers_mom,
       rank: p.rank,
-      rankChange: p.rank_change,
+      rankChange: p.rank_mom,
     };
   });
 
