@@ -239,14 +239,12 @@ async def _run_close(
 def _harvest_priority(now: datetime) -> int | None | Literal[False]:
     """False = idle. None = all priorities. int = priority ceiling.
 
-    Calendar is UTC. Near month-end (last 3 days) prefer top channels first;
-    last day after 08:00 UTC → idle (close starts 00:01 UTC on the 1st).
+    Calendar is UTC. Harvest always uses all priorities; last day after
+    08:00 UTC → idle (close starts 00:01 UTC on the 1st).
     """
     last = monthrange(now.year, now.month)[1]
     if now.day == last and (now.hour, now.minute, now.second) >= (8, 0, 0):
         return False
-    if now.day >= last - 2:
-        return 100
     return None
 
 
@@ -302,7 +300,6 @@ async def run_auto(
     1) days 1..5 UTC (or --force): close only — YAML + pipeline_run
     2) outside close window:
        - last day >= 08:00 UTC — idle
-       - last 3 days (before idle) — harvest priority<=100
        - else — harvest all priorities
 
     Unfinished close after day 5 is not auto-resumed; use manual commands.

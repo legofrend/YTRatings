@@ -7,9 +7,9 @@ Description=Run ytr-auto.service on schedule (UTC)
 # Close: 1st @ 00:01 (scenario window) + 1st @ 07:01 (new YT quota day).
 OnCalendar=*-*-11 05:00:00 UTC
 OnCalendar=*-*-20 05:00:00 UTC
-OnCalendar=*-*-~3 05:00:00 UTC
-OnCalendar=*-*-~2 05:00:00 UTC
-OnCalendar=*-*-~1 05:00:00 UTC
+OnCalendar=*-*~3 05:00:00 UTC
+OnCalendar=*-*~2 05:00:00 UTC
+OnCalendar=*-*~1 05:00:00 UTC
 OnCalendar=*-*-01 00:01:00 UTC
 OnCalendar=*-*-01 07:01:00 UTC
 AccuracySec=1min
