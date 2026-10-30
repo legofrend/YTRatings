@@ -870,9 +870,12 @@ def main(argv: list[str] | None = None) -> None:
         ntfy.configure(level=args.ntfy)
 
     cmds = " ".join(args.commands)
+    is_auto = args.commands == ["auto"]
     start_dt = datetime.now()
     print("Start", start_dt)
-    ntfy.info(f"pipeline start: {cmds}", title="ytr · start")
+    # auto owns its own start/done ntfy (one message with the chosen plan).
+    if not is_auto:
+        ntfy.info(f"pipeline start: {cmds}", title="ytr · start")
     try:
         asyncio.run(_run_parsed(args))
     except BaseException as e:
@@ -888,7 +891,10 @@ def main(argv: list[str] | None = None) -> None:
         elapsed = datetime.now() - start_dt
         print("Finish after ", elapsed)
         print("\a")
-        ntfy.info(f"pipeline done after {elapsed}: {cmds}", title="ytr · done")
+        if not is_auto:
+            ntfy.info(
+                f"pipeline done after {elapsed}: {cmds}", title="ytr · done"
+            )
     finally:
         try:
             from app.api import yt_quota
@@ -915,10 +921,8 @@ async def _run_parsed(args: argparse.Namespace) -> None:
         from app.pipeline.runner import run_auto
 
         cats = await resolve_category_ids(parse_cats(args.cats))
-        await _with_ntfy(
-            "auto",
-            run_auto(category_ids=cats, force=args.force),
-        )
+        # No _with_ntfy: run_auto sends one start (with plan) + phase done/fail.
+        await run_auto(category_ids=cats, force=args.force)
         return
 
     if args.commands == ["edit-channels"]:

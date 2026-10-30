@@ -137,10 +137,6 @@ async def _run_close_steps(
 ) -> RunStatus:
     """Close only: resume via pipeline_run until done or soft-stop."""
     await ensure_run_rows(scenario, period)
-    ntfy.info(
-        f"auto close start period={period.strf('%p')}",
-        title="ytr · auto close",
-    )
 
     while True:
         step = await next_pending_step(scenario, period)
@@ -261,10 +257,6 @@ async def _run_harvest(
     logger.info(
         f"auto: {label} period={period.strf('%p')} priority={priority}"
     )
-    ntfy.info(
-        f"auto {label} start period={period.strf('%p')}",
-        title=f"ytr · auto {label}",
-    )
 
     stop = await cmd_fetch_videos(period, category_ids, priority=priority)
     if stop not in _QUOTA_STOPS:
@@ -309,22 +301,45 @@ async def run_auto(
     await ensure_schema()
     logger.info(f"auto: now={now.isoformat()} force={force}")
 
-    close_status = await _run_close(
-        category_ids=category_ids, force=force, now=now
-    )
-    # Close stage (in window / --force): never fall through to harvest.
-    if close_status != "skipped":
+    # Decide plan first, then one start ntfy. Crash before this still gets
+    # pipeline FAILED from main(); silent only if we exit idle/skip without work.
+    scenario = load_scenario("close")
+    close_period = resolve_period(scenario, now)
+    in_close = in_calendar_window(scenario, now) or force
+    priority = _harvest_priority(now)
+
+    if in_close:
+        ntfy.info(
+            f"auto close period={close_period.strf('%p')} "
+            f"force={force} cats={len(category_ids)}",
+            title="ytr · auto close",
+        )
+        await _run_close(
+            category_ids=category_ids, force=force, now=now
+        )
         return
 
-    priority = _harvest_priority(now)
     if priority is False:
         logger.info(
             "auto: idle — last day of month after 08:00 UTC; "
             "wait for next month"
         )
+        ntfy.info(
+            "auto idle — last day after 08:00 UTC, wait for close",
+            title="ytr · auto idle",
+        )
         return
 
     period = Period(now.month, now.year)
+    prio_label = (
+        f"priority<={priority}" if priority is not None else "all priorities"
+    )
+    label = "harvest_top" if priority is not None else "harvest_all"
+    ntfy.info(
+        f"auto {label} period={period.strf('%p')} {prio_label} "
+        f"cats={len(category_ids)}",
+        title=f"ytr · auto {label}",
+    )
     await _run_harvest(
         period=period, category_ids=category_ids, priority=priority
     )
