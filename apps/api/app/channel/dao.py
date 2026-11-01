@@ -1342,7 +1342,9 @@ class ChannelRatingDAO(BaseDAO):
                     subscriber_count AS channel_subscribers,
                     video_count AS channel_videos
                 FROM channel_stat
-                WHERE report_period = (:report_period::date - INTERVAL '1 month')
+                WHERE report_period = (
+                    CAST(:report_period AS date) - INTERVAL '1 month'
+                )
                 ORDER BY channel_id, id DESC
             ),
             video_stats AS (
