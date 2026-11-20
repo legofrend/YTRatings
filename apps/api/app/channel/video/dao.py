@@ -49,8 +49,12 @@ class VideoDAO(BaseDAO):
             return result.scalars().all()
 
     @classmethod
-    async def add_update_bulk(cls, data, do_nothing: bool = False):
-        return await super().add_update_bulk(data, do_nothing=do_nothing)
+    async def add_update_bulk(
+        cls, data, do_nothing: bool = False, skip_unchanged: bool = False
+    ):
+        return await super().add_update_bulk(
+            data, do_nothing=do_nothing, skip_unchanged=skip_unchanged
+        )
 
     @classmethod
     async def update_bulk(cls, data: list[dict], identifier: str = None) -> bool:

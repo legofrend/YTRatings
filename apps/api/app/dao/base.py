@@ -1,4 +1,12 @@
-from sqlalchemy import delete, select, text, update, literal_column, Boolean
+from sqlalchemy import (
+    Boolean,
+    delete,
+    literal_column,
+    or_,
+    select,
+    text,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
 from datetime import date, datetime, timedelta
@@ -8,6 +16,9 @@ from app.logger import logger, save_errors
 
 # Оптимальный размер батча для PostgreSQL
 LIMIT = 1000  # Было 500
+
+# Never rewrite audit cols on upsert — updated_at is trigger-owned.
+_UPSERT_SKIP_COLS = frozenset({"created_at", "updated_at"})
 
 
 def _format_sql_literal(value, sa_type=None) -> str:
@@ -170,7 +181,21 @@ class BaseDAO:
             return None
 
     @classmethod
-    async def add_update_bulk(cls, data, do_nothing: bool = False):
+    async def add_update_bulk(
+        cls,
+        data,
+        do_nothing: bool = False,
+        skip_unchanged: bool = False,
+    ):
+        """Bulk upsert by ``gid``.
+
+        do_nothing: ON CONFLICT DO NOTHING.
+        skip_unchanged: ON CONFLICT DO UPDATE only when a data col actually
+        differs (IS DISTINCT FROM). Avoids heap/WAL/index churn + updated_at
+        trigger on no-op re-syncs (e.g. playlist_shorts).
+        """
+        if do_nothing and skip_unchanged:
+            raise ValueError("do_nothing and skip_unchanged are mutually exclusive")
         if not data:
             return False
 
@@ -196,15 +221,35 @@ class BaseDAO:
                     update_cols = [
                         c.name
                         for c in cls.model.__table__.columns
-                        if c.name != cls.gid and c.name not in pk_names
+                        if c.name != cls.gid
+                        and c.name not in pk_names
+                        and c.name not in _UPSERT_SKIP_COLS
                     ]
-                    stmt = stmt.on_conflict_do_update(
-                        index_elements=[cls.gid],
-                        set_={k: getattr(stmt.excluded, k) for k in update_cols},
-                    )
+                    conflict_kw: dict = {
+                        "index_elements": [cls.gid],
+                        "set_": {
+                            k: getattr(stmt.excluded, k) for k in update_cols
+                        },
+                    }
+                    if skip_unchanged and update_cols:
+                        table = cls.model.__table__
+                        conflict_kw["where"] = or_(
+                            *(
+                                table.c[k].is_distinct_from(
+                                    getattr(stmt.excluded, k)
+                                )
+                                for k in update_cols
+                            )
+                        )
+                    stmt = stmt.on_conflict_do_update(**conflict_kw)
+                    # xmax=0 → inserted this stmt; else conflict hit
+                    # (real UPDATE or WHERE-skipped). With skip_unchanged,
+                    # "updated" ≈ existing, includes no-ops.
                     stmt = stmt.returning(
                         cls.model.id,
-                        literal_column("(xmax = 0)", type_=Boolean).label("inserted"),
+                        literal_column("(xmax = 0)", type_=Boolean).label(
+                            "inserted"
+                        ),
                     )
 
                 async with async_session_maker() as session:
@@ -239,6 +284,11 @@ class BaseDAO:
             )
             if total_skipped:
                 msg += f", {total_skipped} skipped"
+        elif skip_unchanged:
+            msg = (
+                f"Added {total_inserted} and matched {total_updated} existing "
+                f"in {cls.model.__tablename__} (skip_unchanged)"
+            )
         else:
             msg = (
                 f"Added {total_inserted} and updated {total_updated} records "

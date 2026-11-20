@@ -1056,11 +1056,7 @@ CREATE INDEX idx_playlist_shorts_channel_published ON public.playlist_shorts USI
 
 CREATE INDEX idx_playlist_shorts_published_period ON public.playlist_shorts USING btree (published_at_period);
 
---
--- Name: idx_playlist_shorts_video_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_playlist_shorts_video_id ON public.playlist_shorts USING btree (video_id);
+-- idx_playlist_shorts_video_id dropped: duplicate of UNIQUE (video_id).
 
 --
 -- Name: idx_video_aggregate; Type: INDEX; Schema: public; Owner: -

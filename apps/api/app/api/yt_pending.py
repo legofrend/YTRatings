@@ -129,7 +129,7 @@ async def _write_video_insert(rows: list[dict], meta: dict) -> bool:
 async def _write_playlist_shorts(rows: list[dict], meta: dict) -> bool:
     from app.channel.playlist_shorts.dao import PlaylistShortsDAO
 
-    return await PlaylistShortsDAO.add_update_bulk(rows)
+    return await PlaylistShortsDAO.add_update_bulk(rows, skip_unchanged=True)
 
 
 async def _write_channel_detail_update(rows: list[dict], meta: dict) -> bool:
