@@ -108,7 +108,10 @@ class WordstatDAO:
         stop_lexemes: list[str] | None = None,
         stop_path: Path | str | None = None,
     ) -> dict:
-        """Compute top-N lexemes per category×period (longs only), type=NULL."""
+        """Compute top-N lexemes per category×period (longs only), type=NULL.
+
+        Freq via ts_stat(title_tsv); surface `word` via ts_debug only for top-N.
+        """
         if top_n < 1:
             raise ValueError("top_n must be >= 1")
         start = _as_date(period_from)
@@ -138,54 +141,83 @@ class WordstatDAO:
                     )
                     deleted += n_del.rowcount or 0
 
-                    result = await session.execute(
+                    await session.execute(text("DROP TABLE IF EXISTS tmp_ws_titles"))
+                    await session.execute(
                         text(
                             f"""
-                            WITH titles AS (
-                                SELECT v.title
-                                FROM video v
-                                JOIN channel c ON c.channel_id = v.channel_id
-                                WHERE c.category_id = :category_id
-                                  AND c.status = {ChannelStatus.ACTIVE}
-                                  AND v.published_at_period = :period
-                                  AND COALESCE(v.is_short, false) = false
-                                  AND v.title IS NOT NULL
-                                  AND length(btrim(v.title)) > 0
-                            ),
-                            tok AS (
+                            CREATE TEMP TABLE tmp_ws_titles AS
+                            SELECT v.title, v.title_tsv
+                            FROM video v
+                            JOIN channel c ON c.channel_id = v.channel_id
+                            WHERE c.category_id = :category_id
+                              AND c.status = {ChannelStatus.ACTIVE}
+                              AND v.published_at_period = :period
+                              AND COALESCE(v.is_short, false) = false
+                              AND v.title_tsv IS NOT NULL
+                              AND v.title IS NOT NULL
+                              AND length(btrim(v.title)) > 0
+                            """
+                        ),
+                        {"category_id": category_id, "period": period},
+                    )
+
+                    result = await session.execute(
+                        text(
+                            """
+                            WITH top AS (
                                 SELECT
-                                    d.token AS surface,
-                                    d.lexemes[1] AS lexeme
-                                FROM titles t
-                                CROSS JOIN LATERAL ts_debug('russian', t.title) AS d
+                                    s.word AS lexeme,
+                                    s.nentry::int AS freq
+                                FROM ts_stat(
+                                    'SELECT title_tsv FROM tmp_ws_titles'
+                                ) AS s
+                                WHERE CAST(:stops AS text[]) IS NULL
+                                   OR cardinality(CAST(:stops AS text[])) = 0
+                                   OR NOT (
+                                       s.word = ANY (CAST(:stops AS text[]))
+                                   )
+                                ORDER BY s.nentry DESC
+                                LIMIT :top_n
+                            ),
+                            surf AS (
+                                SELECT
+                                    d.lexemes[1] AS lexeme,
+                                    d.token AS surface
+                                FROM tmp_ws_titles t
+                                CROSS JOIN LATERAL ts_debug(
+                                    'russian', t.title
+                                ) AS d
                                 WHERE d.lexemes IS NOT NULL
                                   AND cardinality(d.lexemes) >= 1
                                   AND d.alias IN (
                                       'word', 'asciiword', 'hword',
                                       'hword_part', 'numhword'
                                   )
-                                  AND (
-                                      CAST(:stops AS text[]) IS NULL
-                                      OR cardinality(CAST(:stops AS text[])) = 0
-                                      OR NOT (d.lexemes[1] = ANY (CAST(:stops AS text[])))
-                                  )
+                                  AND d.lexemes[1] IN (SELECT lexeme FROM top)
                             ),
-                            agg AS (
+                            surf_mode AS (
                                 SELECT
                                     lexeme,
-                                    mode() WITHIN GROUP (ORDER BY surface) AS word,
-                                    count(*)::int AS freq
-                                FROM tok
+                                    mode() WITHIN GROUP (
+                                        ORDER BY surface
+                                    ) AS word
+                                FROM surf
                                 GROUP BY lexeme
-                                ORDER BY freq DESC
-                                LIMIT :top_n
+                            ),
+                            picked AS (
+                                SELECT
+                                    t.lexeme,
+                                    t.freq,
+                                    COALESCE(m.word, t.lexeme) AS word
+                                FROM top t
+                                LEFT JOIN surf_mode m ON m.lexeme = t.lexeme
                             )
                             INSERT INTO wordstat (
                                 category_id, period, lexeme, word, freq, type
                             )
                             SELECT
                                 :category_id, :period, lexeme, word, freq, NULL
-                            FROM agg
+                            FROM picked
                             RETURNING id
                             """
                         ),
