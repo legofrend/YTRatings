@@ -449,27 +449,29 @@ class VideoDAO(BaseDAO):
 
         null_sql = " AND v.is_short IS NULL" if only_null else ""
         # In UUSH → TRUE (any status). Not in UUSH → FALSE only for status=1.
+        # One LEFT JOIN (not EXISTS×3) — planner uses idx_playlist_shorts_video_id.
         # updated_at: trigger_set_updated_at_video
         q = text(
             f"""
             UPDATE video v
-            SET is_short = EXISTS (
-                SELECT 1 FROM playlist_shorts ps WHERE ps.video_id = v.video_id
-            )
-            FROM channel c
-            WHERE v.video_id IN :video_ids
-              AND v.channel_id = c.channel_id
+            SET is_short = x.in_ps
+            FROM (
+                SELECT
+                    v2.video_id,
+                    v2.channel_id,
+                    v2.published_at,
+                    v2.status,
+                    (ps.video_id IS NOT NULL) AS in_ps
+                FROM video v2
+                LEFT JOIN playlist_shorts ps ON ps.video_id = v2.video_id
+                WHERE v2.video_id IN :video_ids
+            ) x
+            JOIN channel c ON c.channel_id = x.channel_id
+            WHERE v.video_id = x.video_id
               AND c.last_shorts_fetch_dt IS NOT NULL
-              AND v.published_at < c.last_shorts_fetch_dt
-              AND (
-                EXISTS (
-                    SELECT 1 FROM playlist_shorts ps WHERE ps.video_id = v.video_id
-                )
-                OR v.status = 1
-              )
-              AND v.is_short IS DISTINCT FROM EXISTS (
-                  SELECT 1 FROM playlist_shorts ps WHERE ps.video_id = v.video_id
-              )
+              AND x.published_at < c.last_shorts_fetch_dt
+              AND (x.in_ps OR x.status = 1)
+              AND v.is_short IS DISTINCT FROM x.in_ps
               {null_sql}
             RETURNING v.is_short
             """
