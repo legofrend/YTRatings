@@ -45,8 +45,9 @@ class Settings(BaseSettings):
     # Auth via ADC or GOOGLE_APPLICATION_CREDENTIALS.
     BQ_PROJECT_ID: str | None = None
     BQ_DATASET: str | None = None
-    # Prefer service-account JSON key for stable scripts (path outside repo).
-    # If set, used instead of user ADC from `gcloud auth application-default login`.
+    # Prefer inline SA JSON in .env (GOOGLE_SERVICE_ACCOUNT_JSON).
+    # Fallback: path via GOOGLE_APPLICATION_CREDENTIALS, then user ADC.
+    GOOGLE_SERVICE_ACCOUNT_JSON: str | None = None
     GOOGLE_APPLICATION_CREDENTIALS: str | None = None
 
     SECRET_KEY: str

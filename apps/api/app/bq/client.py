@@ -27,6 +27,7 @@ Run (requires ingest deps: poetry install --with ingest):
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from dataclasses import dataclass
@@ -38,6 +39,8 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 
 from app.config import settings
+
+_SA_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
 
 
 @dataclass
@@ -82,57 +85,90 @@ def _resolve_project_id(explicit: str | None = None) -> str | None:
     )
 
 
-def describe_auth(project_id: str | None = None) -> BqAuthInfo:
+def _sa_json_raw() -> str | None:
+    raw = (
+        os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+        or settings.GOOGLE_SERVICE_ACCOUNT_JSON
+    )
+    if not raw:
+        return None
+    raw = raw.strip()
+    if (raw.startswith("'") and raw.endswith("'")) or (
+        raw.startswith('"') and raw.endswith('"')
+    ):
+        raw = raw[1:-1]
+    return raw or None
+
+
+def _credentials_from_settings():
+    """Prefer inline SA JSON from .env; else key file path; else None (ADC)."""
+    raw = _sa_json_raw()
+    if raw:
+        info = json.loads(raw)
+        creds = service_account.Credentials.from_service_account_info(
+            info, scopes=_SA_SCOPES
+        )
+        return creds, "service_account_env_json", None
+
     creds_path = (
         os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
         or settings.GOOGLE_APPLICATION_CREDENTIALS
     )
-    if creds_path:
-        creds_path = _resolve_creds_path(creds_path)
-    resolved_project = _resolve_project_id(project_id)
+    if not creds_path:
+        return None, "application_default_credentials", None
 
-    if creds_path:
-        if not os.path.isfile(creds_path):
-            return BqAuthInfo(
-                method="service_account_file_missing",
-                project_id=resolved_project,
-                credentials_path=creds_path,
-                service_account_email=None,
-            )
-        creds = service_account.Credentials.from_service_account_file(creds_path)
+    creds_path = _resolve_creds_path(creds_path)
+    if not os.path.isfile(creds_path):
+        raise FileNotFoundError(
+            f"GOOGLE_APPLICATION_CREDENTIALS points to missing file: {creds_path}"
+        )
+    # So nested Google libs / child procs see the absolute path.
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
+    creds = service_account.Credentials.from_service_account_file(
+        creds_path, scopes=_SA_SCOPES
+    )
+    return creds, "service_account_file", os.path.abspath(creds_path)
+
+
+def describe_auth(project_id: str | None = None) -> BqAuthInfo:
+    resolved_project = _resolve_project_id(project_id)
+    try:
+        creds, method, creds_path = _credentials_from_settings()
+    except FileNotFoundError:
+        creds_path = _resolve_creds_path(
+            os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+            or settings.GOOGLE_APPLICATION_CREDENTIALS
+            or ""
+        )
         return BqAuthInfo(
-            method="service_account_json",
-            project_id=resolved_project or creds.project_id,
-            credentials_path=os.path.abspath(creds_path),
-            service_account_email=getattr(creds, "service_account_email", None),
+            method="service_account_file_missing",
+            project_id=resolved_project,
+            credentials_path=creds_path,
+            service_account_email=None,
+        )
+    except json.JSONDecodeError:
+        return BqAuthInfo(
+            method="service_account_env_json_invalid",
+            project_id=resolved_project,
+            credentials_path=None,
+            service_account_email=None,
         )
 
     return BqAuthInfo(
-        method="application_default_credentials",
-        project_id=resolved_project,
-        credentials_path=None,
-        service_account_email=None,
+        method=method,
+        project_id=resolved_project
+        or (getattr(creds, "project_id", None) if creds else None),
+        credentials_path=creds_path,
+        service_account_email=(
+            getattr(creds, "service_account_email", None) if creds else None
+        ),
     )
 
 
 def get_client(project_id: str | None = None) -> bigquery.Client:
     resolved_project = _resolve_project_id(project_id)
-    creds_path = (
-        os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-        or settings.GOOGLE_APPLICATION_CREDENTIALS
-    )
-    if creds_path:
-        creds_path = _resolve_creds_path(creds_path)
-        # So nested Google libs / child procs see the absolute path.
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
-        if not os.path.isfile(creds_path):
-            raise FileNotFoundError(
-                f"GOOGLE_APPLICATION_CREDENTIALS points to missing file: {creds_path}"
-            )
-        credentials = service_account.Credentials.from_service_account_file(
-            creds_path,
-            scopes=["https://www.googleapis.com/auth/cloud-platform"],
-        )
+    credentials, method, _creds_path = _credentials_from_settings()
+    if credentials is not None:
         return bigquery.Client(
             project=resolved_project or credentials.project_id,
             credentials=credentials,
@@ -167,7 +203,8 @@ def test_connection(
             error=str(exc),
             hint=(
                 "Local: run `gcloud auth application-default login` "
-                "or set GOOGLE_APPLICATION_CREDENTIALS to a service account JSON key."
+                "or set GOOGLE_SERVICE_ACCOUNT_JSON / "
+                "GOOGLE_APPLICATION_CREDENTIALS in .env."
             ),
         )
     except FileNotFoundError as exc:
@@ -175,7 +212,17 @@ def test_connection(
             ok=False,
             auth=auth,
             error=str(exc),
-            hint="Download a JSON key for a service account and fix the path in .env.",
+            hint=(
+                "Set GOOGLE_SERVICE_ACCOUNT_JSON in .env, or fix "
+                "GOOGLE_APPLICATION_CREDENTIALS path."
+            ),
+        )
+    except json.JSONDecodeError as exc:
+        return BqTestResult(
+            ok=False,
+            auth=auth,
+            error=str(exc),
+            hint="GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON.",
         )
 
     auth.project_id = auth.project_id or client.project

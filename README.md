@@ -244,3 +244,35 @@ python -m app.main edit-channels --file edits.jsonl --apply
 # UCyyy…,19,,
 # @somehandle,3,1,50
 ```
+
+### Month-end: wordstat → картинки → SSG → VPS
+
+После `auto` close (`build-rating` done). Порядок:
+
+1. **wordstat** локально — fill таблицы + MoM type + SVG  
+2. **scp** SVG на VPS (`media/` деплой site/ не трогает)  
+3. **SSG** в конце — Nuxt generate с живым API + заливка `site/`
+
+```bash
+cd apps/api
+
+# 1. fill wordstat (top 40) + type MoM + SVG → ../../media/wordstat_img/{cat}_{YYYY-MM}.svg
+# без --cats = все активные категории; без --force = skip fill если период уже есть
+python -m app.main wordstat --period 2026-10
+# python -m app.main wordstat --period 2026-10 --cats 1 --top 40
+# python -m app.main wordstat --period 2026-10 --skip-svg   # только таблица
+# python -m app.main wordstat --period 2026-10 --force      # пересчитать fill+type+svg
+
+# 2. залить SVG на VPS (nginx: /wordstat_img/ → media/wordstat_img/)
+# из корня репо (не из apps/api):
+scp -i ~/.ssh/id_ed25519 media/wordstat_img/*_2026-10.svg root@o2t4.ru:/srv/projects/ytratings/media/wordstat_img/
+
+# 3. SSG + sync site/ (читает API ytr.o2t4.ru — рейтинги/wordstat уже в БД)
+# из корня репо:
+.\deploy\deploy-ytr.ps1 -SkipCommit -SkipDocker
+# = npm run generate → mirror в site/ → tar на VPS → nginx reload
+# Docker/API не трогает. Нужен commit+push заранее, если менялся код.
+```
+
+Сценарий close (YT fetch + denorm + rating): `apps/api/scenarios/close.yaml`.  
+Wordstat/SSG в auto пока не входят (todo #4).
